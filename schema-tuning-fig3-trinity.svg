@@ -1,0 +1,29 @@
+<svg viewBox="0 0 680 340" width="100%" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>schema 三位一体：单一事实源派生 GBNF grammar、Validator 与 Codec</title>
+<desc>nlu_10 schema 作为单一事实源，同时生成生成侧 grammar 约束、校验规则和解析代码枚举，变更同步传播。</desc>
+<defs>
+<marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+<path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+</marker>
+</defs>
+<style>.th{font-family:sans-serif;font-size:14px;font-weight:500;fill:#E6EDF3}.ts{font-family:sans-serif;font-size:11.5px;fill:#9AA7B4}.bb{font-family:sans-serif;font-size:13px;font-weight:500;fill:#F1EFE8}</style>
+<text class="th" x="40" y="28">三位一体：schema 是唯一事实源，三个产物全部派生</text>
+<text class="ts" x="40" y="46">改一处 → 三处同步重生成，不同步在编译期暴露</text>
+<rect x="40" y="76" width="190" height="80" rx="8" fill="#085041" stroke="#5DCAA5" stroke-width="0.5"/>
+<text class="bb" x="135" y="104" text-anchor="middle">nlu_10 schema</text>
+<text class="ts" x="135" y="126" text-anchor="middle">JSON · 单一事实源</text>
+<text class="ts" x="135" y="144" text-anchor="middle">git 版本化</text>
+<rect x="300" y="76" width="340" height="56" rx="8" fill="#085041" stroke="#5DCAA5" stroke-width="0.5"/>
+<text class="bb" x="320" y="100">① GBNF grammar · 生成侧约束</text>
+<text class="ts" x="320" y="120">llama-server response_format / offline grammar 注入</text>
+<rect x="300" y="150" width="340" height="56" rx="8" fill="#0C447C" stroke="#85B7EB" stroke-width="0.5"/>
+<text class="bb" x="320" y="174">② Validator · 校验规则（L3 候选门）</text>
+<text class="ts" x="320" y="194">enum · absence · 字段序，与 schema 同源生成</text>
+<rect x="300" y="224" width="340" height="56" rx="8" fill="#444441" stroke="#B4B2A9" stroke-width="0.5"/>
+<text class="bb" x="320" y="248">③ Codec + factory case · 解析与代码枚举</text>
+<text class="ts" x="320" y="268">nlu_10 显式枚举，变更走 code review（车规审计）</text>
+<path d="M230,100 C265,100 270,104 298,104" fill="none" stroke="#5DCAA5" stroke-width="1.5" marker-end="url(#arrow)"/>
+<path d="M230,116 C265,116 270,178 298,178" fill="none" stroke="#85B7EB" stroke-width="1.5" marker-end="url(#arrow)"/>
+<path d="M230,132 C265,132 270,252 298,252" fill="none" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text class="ts" x="40" y="316">变更传播：改 schema 一处 → 三个产物同步重生成；漏改在编译期 / 回归测试暴露，不存在静默漂移</text>
+</svg>

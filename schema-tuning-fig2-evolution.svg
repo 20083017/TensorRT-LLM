@@ -1,0 +1,41 @@
+<svg viewBox="0 0 680 430" width="100%" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>nlu_10 schema 从 v1 嵌套自由生成到 v2 扁平封闭枚举的演进对照</title>
+<desc>左侧 V1 嵌套 schema 的五个问题与右侧 V2 扁平受限 schema 的五个对应修正。</desc>
+<style>.th{font-family:sans-serif;font-size:14px;font-weight:500;fill:#E6EDF3}.ts{font-family:sans-serif;font-size:11.5px;fill:#9AA7B4}.tb{font-family:sans-serif;font-size:12px;fill:#C9D4DE}.bb{font-family:sans-serif;font-size:13px;font-weight:500;fill:#F1EFE8}.cd{font-family:Consolas,monospace;font-size:11px;fill:#C9D4DE}</style>
+<text class="th" x="40" y="28">nlu_10 schema：v1（嵌套 + 自由生成）→ v2（扁平 + 封闭枚举）</text>
+<text class="ts" x="40" y="46">五个问题 ↔ 五个修正，一一对应</text>
+<rect x="40" y="64" width="300" height="252" rx="8" fill="#131820" stroke="#F09595" stroke-width="0.5"/>
+<text class="bb" x="60" y="88" fill="#F09595">V1 · 嵌套 + 自由生成</text>
+<text class="cd" x="60" y="112">{</text>
+<text class="cd" x="72" y="130">"intent": "…",</text>
+<text class="cd" x="72" y="148">"slots": {</text>
+<text class="cd" x="84" y="166">"city": "…",</text>
+<text class="cd" x="84" y="184">"date": "…",</text>
+<text class="cd" x="84" y="202">"temp": 23.5</text>
+<text class="cd" x="72" y="220">},</text>
+<text class="cd" x="72" y="238">"confidence": 0.87</text>
+<text class="cd" x="60" y="256">}</text>
+<rect x="350" y="64" width="300" height="252" rx="8" fill="#131820" stroke="#5DCAA5" stroke-width="0.5"/>
+<text class="bb" x="370" y="88" fill="#5DCAA5">V2 · 扁平 + 封闭枚举</text>
+<text class="cd" x="370" y="112">{</text>
+<text class="cd" x="382" y="130">"intent": "hvac_temp_up",</text>
+<text class="cd" x="382" y="148">"city": "北京",</text>
+<text class="cd" x="382" y="166">"date": "tomorrow",</text>
+<text class="cd" x="382" y="184">"temp_level": "high"</text>
+<text class="cd" x="370" y="202">}</text>
+<line x1="370" y1="218" x2="630" y2="218" stroke="#2D3641" stroke-width="0.5"/>
+<text class="ts" x="370" y="236">intent：封闭枚举（全量 intent 列表）</text>
+<text class="ts" x="370" y="254">city：受控词表 | 空串　date/temp_level：枚举 | 空串</text>
+<text class="ts" x="370" y="272">字段序固定（intent 永远在前）· 缺失 = ""</text>
+<text class="ts" x="370" y="290">additionalProperties: false</text>
+<text class="tb" x="40" y="336" fill="#F09595">① 深度 2 嵌套——0.6B 每层都是出错点</text>
+<text class="tb" x="40" y="354" fill="#F09595">② intent 自由生成——填空题</text>
+<text class="tb" x="40" y="372" fill="#F09595">③ number 类型——数字 token 切分易错位</text>
+<text class="tb" x="40" y="390" fill="#F09595">④ confidence——0.6B 校准极差，无决策价值</text>
+<text class="tb" x="40" y="408" fill="#F09595">⑤ 槽位缺失表达未定义——空串/null/省略三选一</text>
+<text class="tb" x="350" y="336" fill="#5DCAA5">① 深度 = 1 · 字段序固定（intent 在前）</text>
+<text class="tb" x="350" y="354" fill="#5DCAA5">② 封闭枚举 + grammar——变成选择题</text>
+<text class="tb" x="350" y="372" fill="#5DCAA5">③ 字符串 + 枚举粒度（low/mid/high）</text>
+<text class="tb" x="350" y="390" fill="#5DCAA5">④ 删除该字段——置信度交给校验 + retry 面板</text>
+<text class="tb" x="350" y="408" fill="#5DCAA5">⑤ absence = 空串，全库唯一表达</text>
+</svg>

@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>SFT 数据生产设计方案 —— 从契约冻结到端侧上车</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; color: #2C2C2A; background: #FFFFFF; margin: 0; line-height: 1.7; }
+  .page { max-width: 960px; margin: 0 auto; padding: 48px 40px 80px; }
+  h1 { font-size: 26px; font-weight: 600; border-bottom: 3px solid #534AB7; padding-bottom: 12px; margin-top: 8px; }
+  h1 + .meta { color: #888780; font-size: 13px; margin-bottom: 32px; }
+  h2 { font-size: 20px; font-weight: 600; margin-top: 48px; border-left: 4px solid #534AB7; padding-left: 12px; }
+  h3 { font-size: 16px; font-weight: 600; margin-top: 28px; color: #3C3489; }
+  table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 13.5px; }
+  th { background: #F1EFE8; text-align: left; padding: 8px 10px; border: 1px solid #D3D1C7; font-weight: 600; }
+  td { padding: 8px 10px; border: 1px solid #D3D1C7; vertical-align: top; }
+  tr:nth-child(even) td { background: #FAFAF7; }
+  code { font-family: Consolas, "Courier New", monospace; background: #F1EFE8; padding: 1px 5px; border-radius: 3px; font-size: 12.5px; color: #993C1D; }
+  pre { background: #2C2C2A; color: #D3D1C7; padding: 16px 20px; border-radius: 8px; overflow-x: auto; font-size: 12.5px; line-height: 1.55; }
+  pre code { background: none; color: inherit; padding: 0; }
+  .figure { background: #1F1E1B; border-radius: 12px; padding: 24px 12px; margin: 24px 0; }
+  .figure-caption { text-align: center; color: #888780; font-size: 12.5px; margin-top: 8px; }
+  .note { background: #E6F1FB; border-left: 4px solid #378ADD; padding: 10px 16px; border-radius: 0 6px 6px 0; margin: 16px 0; font-size: 13.5px; }
+  .warn { background: #FAEEDA; border-left: 4px solid #BA7517; padding: 10px 16px; border-radius: 0 6px 6px 0; margin: 16px 0; font-size: 13.5px; }
+  .danger { background: #FCEBEB; border-left: 4px solid #A32D2D; padding: 10px 16px; border-radius: 0 6px 6px 0; margin: 16px 0; font-size: 13.5px; }
+  .gloss { font-size: 13px; }
+  .gloss td:first-child { white-space: nowrap; font-weight: 600; color: #3C3489; }
+  ul, ol { padding-left: 24px; }
+  li { margin: 4px 0; }
+  .tag { display: inline-block; font-size: 11.5px; padding: 1px 8px; border-radius: 10px; margin-left: 6px; font-weight: 400; }
+  .p0 { background: #FCEBEB; color: #A32D2D; }
+  .p1 { background: #FAEEDA; color: #854F0B; }
+  .p2 { background: #E6F1FB; color: #0C447C; }
+  .term { font-weight: 600; color: #3C3489; }
+  .toc { background: #F1EFE8; padding: 16px 24px; border-radius: 8px; font-size: 13.5px; }
+  .toc a { color: #3C3489; text-decoration: none; }
+</style>
+</head>
+<body>
+<div class="page">
+
+<h1>SFT 数据生产设计方案 —— 从契约冻结到端侧上车</h1>
+<div class="meta">nlu_10 协议 · Qwen3-0.6B · llama.cpp 部署链 · 2026-10-27 · 配套文档：《schema 调优设计方案》《模型权重与量化》</div>
+
+<div class="toc">
+<strong>目录</strong>：
+<a href="#g0">0. 阅读指引</a> ·
+<a href="#g1">1. 术语表（先读）</a> ·
+<a href="#g2">2. 结论速览</a> ·
+<a href="#g3">3. 阶段 0：契约冻结</a> ·
+<a href="#g4">4. 阶段 1：数据规格</a> ·
+<a href="#g5">5. 阶段 2：三源采集</a> ·
+<a href="#g6">6. 阶段 3：质量闸门</a> ·
+<a href="#g7">7. 阶段 4：渲染与切分</a> ·
+<a href="#g8">8. 阶段 5：LoRA SFT 实操</a> ·
+<a href="#g9">9. 阶段 6–7：训后闭环与上车</a> ·
+<a href="#g10">10. 数量与验收门槛</a> ·
+<a href="#g11">11. 常见坑</a> ·
+<a href="#g12">12. 与既有文档的关系</a>
+</div>
+
+<h2 id="g0">0. 阅读指引</h2>
+<p>本文面向<strong>初次接触 LLM 训练侧的工程师</strong>。全文涉及的英文缩写在<strong>第 1 章术语表</strong>中集中解释；正文中每个术语<strong>首次出现</strong>时也以「缩写（全称，中文含义）」的形式标注，方便顺着读。表内「一句话解释」按本文语境给出，力求够用而非百科式完整。</p>
+
+<h2 id="g1">1. 术语表（专有名词速查）</h2>
+
+<h3>1.1 任务与场景</h3>
+<table class="gloss">
+<tr><th>缩写 / 术语</th><th>全称</th><th>一句话解释</th></tr>
+<tr><td>NLU</td><td>Natural Language Understanding，自然语言理解</td><td>把用户自然语言转成机器可执行结构（意图 + 槽位）的模块，即本文训练的模型要完成的任务</td></tr>
+<tr><td>DM</td><td>Dialogue Manager，对话管理</td><td>NLU 结果的下游消费方，根据意图和槽位决定系统如何响应</td></tr>
+<tr><td>intent</td><td>意图</td><td>用户想干什么，如 hvac_on（开空调）、navi_to（导航去某地）</td></tr>
+<tr><td>slot</td><td>槽位</td><td>意图的参数，如 city（城市）、temperature（温度）；槽位缺失需有统一的「absence（缺失）」表达</td></tr>
+<tr><td>nlu_10</td><td>—</td><td>本项目 NLU 输出协议的版本号：descriptor marker（标记行）+ JSON（结构化数据体）</td></tr>
+<tr><td>marker</td><td>标记</td><td>包住 JSON 输出的固定字符串（如 <code>###NLU_START###</code>），用于解析时定位</td></tr>
+<tr><td>ASR</td><td>Automatic Speech Recognition，自动语音识别</td><td>语音转文字；转写结果常含同音字等噪声，是车载语音链路的固有输入特性</td></tr>
+<tr><td>WTP184</td><td>—</td><td>当前车载项目代号，NLU 网关的宿主平台</td></tr>
+<tr><td>OTA</td><td>Over-The-Air，空中下载升级</td><td>车机远程更新机制；模型与协议需可版本化追溯</td></tr>
+</table>
+
+<h3>1.2 模型与训练</h3>
+<table class="gloss">
+<tr><th>缩写 / 术语</th><th>全称</th><th>一句话解释</th></tr>
+<tr><td>LLM</td><td>Large Language Model，大语言模型</td><td>基于 Transformer（一种注意力神经网络架构）训练的生成式语言模型</td></tr>
+<tr><td>SFT</td><td>Supervised Fine-Tuning，监督微调</td><td>用「输入 + 标准答案」成对数据教已训练好的模型适配特定任务，本文主题</td></tr>
+<tr><td>LoRA</td><td>Low-Rank Adaptation，低秩适配</td><td>冻结原模型权重、只训练一个低秩增量补丁的微调技术；训练后 merge（合并）进基座等价于直接改权重</td></tr>
+<tr><td>QLoRA</td><td>Quantized LoRA，量化低秩适配</td><td>把基座先量化到低精度再训 LoRA，进一步省显存；0.6B 规模用不到</td></tr>
+<tr><td>merge</td><td>合并</td><td>把 LoRA 增量权重并回基座，产出独立完整权重的步骤</td></tr>
+<tr><td>epoch</td><td>训练轮次</td><td>全部训练数据被完整过一遍的次数；过多会过拟合（背训练集）</td></tr>
+<tr><td>过拟合</td><td>overfitting</td><td>模型把训练集背下来而非学到规律，表现为训练指标升、评测指标降</td></tr>
+<tr><td>loss</td><td>损失（目标函数值）</td><td>衡量模型输出与标准答案差距的数值，训练就是把它降下来</td></tr>
+<tr><td>loss mask</td><td>损失掩码</td><td>逐 token（词元）决定是否参与 loss 计算的开关序列；本文只在 assistant（助手回答）段打开</td></tr>
+<tr><td>packing</td><td>样本拼接</td><td>把多条短样本拼进同一序列提高 GPU 利用率的技术；本场景样本短且结构化，不用</td></tr>
+<tr><td>few-shot</td><td>少样本示例</td><td>在 prompt（提示词）里给模型若干示例帮它理解任务</td></tr>
+<tr><td>HF / transformers</td><td>Hugging Face / 其模型库</td><td>模型与数据集的事实标准托管平台；transformers 是其 Python 训练/推理库</td></tr>
+<tr><td>LLaMA-Factory</td><td>—</td><td>开源训练框架，把 SFT/LoRA 等流程配置化，本文训练实操平台</td></tr>
+<tr><td>Qwen3</td><td>通义千问 3（阿里开源模型系列）</td><td>本文基座；0.6B 版是蒸馏（用大模型输出训练）产物的小模型</td></tr>
+<tr><td>tokenizer / token</td><td>分词器 / 词元</td><td>tokenizer 把文本切成 token（最小处理单位）并映射为整数 ID；「训推一致」的关键部件</td></tr>
+<tr><td>chat template</td><td>对话模板</td><td>把 messages（角色对话列表）渲染成模型输入格式的 Jinja2（Python 模板语言）脚本；训练与推理必须用同一份</td></tr>
+<tr><td>/no_think</td><td>—</td><td>Qwen3 家族支持的软开关：写在消息尾部可抑制思考段输出；SFT 后可解除</td></tr>
+</table>
+
+<h3>1.3 量化与部署</h3>
+<table class="gloss">
+<tr><th>缩写 / 术语</th><th>全称</th><th>一句话解释</th></tr>
+<tr><td>llama.cpp</td><td>—</td><td>C++ 实现的 LLM 推理引擎（含 GGUF 格式与量化工具链），端侧部署首选</td></tr>
+<tr><td>GGUF</td><td>GPT-Generated Unified Format</td><td>llama.cpp 的模型文件格式：权重、tokenizer、chat template 打包单文件</td></tr>
+<tr><td>量化</td><td>quantization</td><td>把权重从高精度浮点压到低位整数以缩小体积、加快推理；有精度代价</td></tr>
+<tr><td>Q8_0 / Q6_K / Q4_K_M</td><td>—</td><td>llama.cpp 量化格式名：数字≈每权重比特数；K = 超块（分组二次压缩 scale）家族；_M = 敏感层用高位宽的混合配方</td></tr>
+<tr><td>bpw</td><td>bits per weight，每权重比特数</td><td>量化程度的通用度量；越大越准、越慢、越大</td></tr>
+<tr><td>imatrix</td><td>importance matrix，重要性矩阵</td><td>用领域数据统计的各权重重要性，指导量化把误差分配到不重要的位置</td></tr>
+<tr><td>GBNF</td><td>GGML Backus-Naur Form</td><td>llama.cpp 的文法约束语言；JSON Schema（JSON 结构描述规范）可转成它，推理时强制模型只能输出合法格式</td></tr>
+<tr><td>greedy</td><td>贪心解码</td><td>每步都取概率最高的 token；结果可复现，评测必须用它</td></tr>
+<tr><td>seed</td><td>随机种子</td><td>固定后采样过程可复现；与 greedy 配合保证评测可对照</td></tr>
+<tr><td>KV cache</td><td>Key-Value cache，键值缓存</td><td>推理时缓存的注意力中间结果，随上下文长度增长</td></tr>
+</table>
+
+<h3>1.4 数据与评测</h3>
+<table class="gloss">
+<tr><th>缩写 / 术语</th><th>全称</th><th>一句话解释</th></tr>
+<tr><td>schema</td><td>模式（结构定义）</td><td>nlu_10 输出的字段、类型、枚举值的正式定义；定稿后即「契约」</td></tr>
+<tr><td>validator</td><td>校验器</td><td>检查数据/输出是否符合 schema 的程序；线上解析、训练数据质检共用同一份（三位一体）</td></tr>
+<tr><td>codec</td><td>编解码器（coder-decoder）</td><td>协议的编/解码实现；本项目按显式枚举组织（不提前做通用框架）</td></tr>
+<tr><td>train / eval</td><td>训练集 / 评测集</td><td>分别用于训练和验收的数据子集；切分不当会「泄漏」导致评测虚高</td></tr>
+<tr><td>泄漏</td><td>data leakage</td><td>评测样本（或其变体）出现在训练集，评测数字失真</td></tr>
+<tr><td>acc</td><td>accuracy，准确率</td><td>分类正确的比例；本文指 intent（意图）识别准确率</td></tr>
+<tr><td>F1</td><td>F1-score</td><td>精确率（precision）与召回率（recall）的调和平均，衡量槽位抽取质量</td></tr>
+<tr><td>PPL</td><td>Perplexity，困惑度</td><td>语言建模误差的通用指标；量化前后对比用（ΔPPL）</td></tr>
+<tr><td>A/B</td><td>对照实验</td><td>同一评测集上对比新旧两版方案</td></tr>
+<tr><td>标注 / 弱标签</td><td>labeling / weak label</td><td>为数据打标准答案；弱标签指来自规则系统等低成本来源、未经人工确认的答案</td></tr>
+</table>
+
+<h2 id="g2">2. 结论速览</h2>
+<ul>
+<li><strong>SFT 数据生产有七个阶段</strong>（见下图）：契约冻结 → 三源采集 → 质量闸门 → 渲染切分 → LoRA SFT → 部署产物链 → 全链路评测 → 上车。</li>
+<li><strong>顺序铁律</strong>：schema（结构定义）v2 与 chat template（对话模板）<strong>同时冻结后才开工产数据</strong>——任何变更都会导致全部标注作废重产。</li>
+<li><strong>主力数据源是逆向合成</strong>（先定 label 标准答案、让大模型反向写用户说法）：标签天然正确、覆盖可控、可大批量。</li>
+<li><strong>车载特有必做项</strong>：ASR（语音识别）噪声增强——模型要学「带噪声的输入 → 干净的标准输出」。</li>
+<li><strong>训后闭环</strong>：SFT 之后必须重跑量化评测（锚定 Q8_0），全过才上车替换，此时可解除 /no_think 依赖。</li>
+</ul>
+
+<div class="figure">
+<svg viewBox="0 0 680 340" width="100%" role="img" xmlns="http://www.w3.org/2000/svg">
+  <title>SFT 数据生产流水线</title>
+  <desc>从契约冻结到上车替换的七个阶段，含质量闸门回炉路径</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+  <text x="40" y="34" class="th" font-size="14" fill="#EEEDFE">SFT 数据生产流水线（nlu_10 · Qwen3-0.6B）</text>
+
+  <polyline points="416,60 416,46 260,46 260,58" fill="none" stroke="#EF9F27" stroke-width="0.5" stroke-dasharray="4 3" marker-end="url(#arrow)"/>
+  <text x="338" y="42" text-anchor="middle" font-size="12" fill="#FAC775">闸门不过 → 回炉重造</text>
+
+  <line x1="169" y1="104" x2="193" y2="104" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="325" y1="104" x2="349" y2="104" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="481" y1="104" x2="505" y2="104" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <g>
+    <rect x="40" y="60" width="128" height="88" rx="8" fill="#3C3489" stroke="#AFA9EC" stroke-width="0.5"/>
+    <text x="104" y="80" text-anchor="middle" dominant-baseline="central" class="th" font-size="14" fill="#EEEDFE">0 · 契约冻结</text>
+    <text x="104" y="98" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#CECBF6">schema v2 定稿</text>
+    <text x="104" y="114" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#CECBF6">chat template 冻结</text>
+    <text x="104" y="130" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#CECBF6">（GGUF 内嵌模板）</text>
+  </g>
+
+  <g>
+    <rect x="196" y="60" width="128" height="88" rx="8" fill="#085041" stroke="#5DCAA5" stroke-width="0.5"/>
+    <text x="260" y="80" text-anchor="middle" dominant-baseline="central" class="th" font-size="14" fill="#E1F5EE">1 · 三源采集</text>
+    <text x="260" y="98" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#9FE1CB">真实日志脱敏</text>
+    <text x="260" y="114" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#9FE1CB">逆向合成 label→query</text>
+    <text x="260" y="130" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#9FE1CB">大模型标注+人工抽检</text>
+  </g>
+
+  <g>
+    <rect x="352" y="60" width="128" height="88" rx="8" fill="#633806" stroke="#EF9F27" stroke-width="0.5"/>
+    <text x="416" y="80" text-anchor="middle" dominant-baseline="central" class="th" font-size="14" fill="#FAEEDA">2 · 质量闸门</text>
+    <text x="416" y="98" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#FAC775">validator 全量校验</text>
+    <text x="416" y="114" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#FAC775">去重 / 覆盖率矩阵</text>
+    <text x="416" y="130" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#FAC775">ASR 噪声增强</text>
+  </g>
+
+  <g>
+    <rect x="508" y="60" width="128" height="88" rx="8" fill="#085041" stroke="#5DCAA5" stroke-width="0.5"/>
+    <text x="572" y="80" text-anchor="middle" dominant-baseline="central" class="th" font-size="14" fill="#E1F5EE">3 · 渲染切分</text>
+    <text x="572" y="98" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#9FE1CB">同模板渲染 token 序列</text>
+    <text x="572" y="114" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#9FE1CB">loss 只算 assistant 段</text>
+    <text x="572" y="130" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#9FE1CB">分层切 train / eval</text>
+  </g>
+
+  <polyline points="572,148 572,174 104,174 104,196" fill="none" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <g>
+    <rect x="40" y="200" width="128" height="88" rx="8" fill="#0C447C" stroke="#85B7EB" stroke-width="0.5"/>
+    <text x="104" y="220" text-anchor="middle" dominant-baseline="central" class="th" font-size="14" fill="#E6F1FB">4 · LoRA SFT</text>
+    <text x="104" y="238" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#B5D4F4">LLaMA-Factory</text>
+    <text x="104" y="254" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#B5D4F4">template=qwen3 对齐</text>
+    <text x="104" y="270" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#B5D4F4">rank 8-16 / epoch 2-3</text>
+  </g>
+
+  <g>
+    <rect x="196" y="200" width="128" height="88" rx="8" fill="#0C447C" stroke="#85B7EB" stroke-width="0.5"/>
+    <text x="260" y="220" text-anchor="middle" dominant-baseline="central" class="th" font-size="14" fill="#E6F1FB">5 · 部署产物链</text>
+    <text x="260" y="238" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#B5D4F4">merge → GGUF convert</text>
+    <text x="260" y="254" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#B5D4F4">imatrix（同域校准）</text>
+    <text x="260" y="270" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#B5D4F4">quantize Q6_K / Q8_0</text>
+  </g>
+
+  <g>
+    <rect x="352" y="200" width="128" height="88" rx="8" fill="#633806" stroke="#EF9F27" stroke-width="0.5"/>
+    <text x="416" y="220" text-anchor="middle" dominant-baseline="central" class="th" font-size="14" fill="#FAEEDA">6 · 全链路评测</text>
+    <text x="416" y="238" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#FAC775">格式率 / intent acc / F1</text>
+    <text x="416" y="254" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#FAC775">锚 Q8_0 · greedy+seed</text>
+    <text x="416" y="270" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#FAC775">SFT 后重跑量化评测</text>
+  </g>
+
+  <g>
+    <rect x="508" y="200" width="128" height="88" rx="8" fill="#085041" stroke="#5DCAA5" stroke-width="0.5"/>
+    <text x="572" y="220" text-anchor="middle" dominant-baseline="central" class="th" font-size="14" fill="#E1F5EE">7 · 上车</text>
+    <text x="572" y="238" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#9FE1CB">输出即非思考母语</text>
+    <text x="572" y="254" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#9FE1CB">解除 /no_think 依赖</text>
+    <text x="572" y="270" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#9FE1CB">retry-rate 面板归零</text>
+  </g>
+
+  <line x1="169" y1="244" x2="193" y2="244" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="325" y1="244" x2="349" y2="244" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="481" y1="244" x2="505" y2="244" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <text x="40" y="316" font-size="12" fill="#888780">质量红线：评测集与训练集分层切分 · 合成数据查重 · ASR 噪声必须覆盖 · SFT 后量化评测必须重跑（锚 Q8_0）</text>
+</svg>
+<div class="figure-caption">图 1 · SFT 数据生产流水线：七阶段 + 质量闸门回炉路径</div>
+</div>
+
+<h2 id="g3">3. 阶段 0：契约冻结（双冻结铁律）</h2>
+<p>SFT 数据的本质是成对的 <strong>(输入, 标准输出)</strong>，标准输出就是 nlu_10 v2 格式的 JSON（JavaScript Object Notation，一种轻量数据交换格式）。因此开工前必须冻结两样东西：</p>
+<table>
+<tr><th>冻结项</th><th>为什么必须先冻结</th><th>变更代价</th></tr>
+<tr><td><strong>schema v2</strong>（nlu_10 结构定义）</td><td>每条数据的 label（标准答案）格式就是它；字段/枚举一改，全部标注作废</td><td>数百上千条 × 人工抽检成本全部重付</td></tr>
+<tr><td><strong>chat template</strong>（GGUF 内嵌模板）</td><td>模型学的是「该模板渲染出的输入分布 → 该格式的输出分布」；模板换了，训练/推理分布错位，微调收益打折</td><td>全部样本重渲染重训，且线上 GGUF 需同步换版</td></tr>
+</table>
+<p>这就是《schema 调优设计方案》中「顺序铁律」的展开：<strong>协议与模板都是先冻结、后产数据；任何变更走版本号并触发数据重产流程</strong>。模板唯一事实源在 GGUF 元数据里，工程配置中不留第二份拷贝（第二份必然漂移）。</p>
+
+<h2 id="g4">4. 阶段 1：数据规格（Data Spec）—— 先定覆盖再动手</h2>
+<p>数据生产不是「有多少收多少」，而是先写<strong>覆盖矩阵</strong>，按矩阵验收：</p>
+<table>
+<tr><th>维度</th><th>要求</th><th>说明</th></tr>
+<tr><td>intent 覆盖</td><td>每个意图 ≥ 50–200 条</td><td>总盘 1k–10k 起步；0.6B 域任务<strong>质量 &gt; 数量</strong></td></tr>
+<tr><td>slot 组合覆盖</td><td>每个意图的槽位：出现 / 缺失 / other 兜底 三态都有实例</td><td>缺失态最容易被遗漏，专门造</td></tr>
+<tr><td>边界对</td><td>近义意图成对出现</td><td>「打开空调」→ hvac_on，与「打开空调 App」→ app_open，对照着喂</td></tr>
+<tr><td>多轮上下文</td><td>带 history（历史对话）的样本占 20–30%</td><td>指代消解用例（上一轮「导航去公司」→ 本轮「换个避开高速的」）；history 按线上网关格式渲染</td></tr>
+<tr><td>ASR 噪声增强</td><td>15–25% 的样本带仿真噪声</td><td>见 5.3 节规则表</td></tr>
+<tr><td>风格多样性</td><td>同一语义 ≥3–5 种说法</td><td>命令式 / 口语化 / 省略主语 / 带语气词</td></tr>
+</table>
+
+<h2 id="g5">5. 阶段 2：三源采集</h2>
+
+<h3>5.1 三源与配比</h3>
+<table>
+<tr><th>来源</th><th>方式</th><th>优点</th><th>缺点</th><th>建议占比</th></tr>
+<tr><td>真实日志（脱敏）</td><td>线上 query 日志 → 人工/大模型复核标注</td><td>分布最真实</td><td>量少、隐私脱敏、长尾偏斜</td><td>20–30%</td></tr>
+<tr><td><strong>逆向合成（主力）</strong></td><td>先采样 (intent, slot 组合)，让云端大模型反向写多样用户表达</td><td><strong>标签天然正确</strong>（构造时写死）、覆盖可控、可大批量</td><td>风格偏书面，需显式要求口语化</td><td>40–50%</td></tr>
+<tr><td>正向标注 + 影子数据</td><td>收集 query 让大模型标 intent/slots；或用现有规则 NLU 的历史结果当弱标签</td><td>接近真实分布</td><td>标签可能有错</td><td>~30%</td></tr>
+</table>
+<div class="note">所有来源的 label 一律过 <strong>schema v2 validator 自动校验</strong>（三位一体中的校验器第二次复用：线上解析、训练数据质检共用同一份代码）。正向标注来源另加 <strong>5–10% 人工抽检</strong>校准大模型标注质量，抽检不合格率 &gt; 3% 时该批次废弃重标。</div>
+
+<h3>5.2 逆向合成 prompt 模板</h3>
+<pre><code>你是车载语音助手的用户模拟器。请根据给定的语义标签，写出 1 条真实车主
+会说的中文口语。要求：
+1. 只输出这句话本身，不要解释；
+2. 风格从以下随机选择：命令式 / 口语省略 / 带语气词（啊、呗、麻烦）；
+3. 数字可用中文或阿拉伯数字随机表达；
+4. {带 ASR 噪声} 时请引入 1 处同音字或近音字错误；
+5. 槽位缺失时自然省略，不要编造。
+
+语义标签：intent={intent}
+槽位：{slots_json}
+风格：{style}
+噪声：{with_asr_noise}</code></pre>
+<p>调用侧按覆盖矩阵采样 (intent, slots, style, with_asr_noise) 组合，批量生成后与构造时写死的 label 组成成对数据——<strong>label 不经过任何模型，因此不可能标错</strong>。</p>
+
+<h3>5.3 ASR 噪声仿真规则（车载特有）</h3>
+<table>
+<tr><th>噪声类型</th><th>示例</th><th>说明</th></tr>
+<tr><td>同音字替换</td><td>空调 → 空掉</td><td>最常见的转写错误，重点覆盖</td></tr>
+<tr><td>近音替换</td><td>导航 → 道航</td><td>拼音相近的错字</td></tr>
+<tr><td>数字转写漂移</td><td>二十四度 / 24 度 / 二四度</td><td>数字的 ASR 输出形态不稳定，label 侧仍输出规范 "24"</td></tr>
+<tr><td>断句/粘连</td><td>把空调打开一下 → 把空调打开一下下、空调打开</td><td>语尾重复或截断</td></tr>
+</table>
+<div class="warn">噪声只进 <strong>user 输入侧</strong>，assistant 标准答案永远是干净的规范输出——模型要学的正是这层「清洗映射」，这是车载 NLU 数据与普通 chatbot 数据最大的差异。</div>
+
+<h2 id="g6">6. 阶段 3：质量闸门（不过就回炉）</h2>
+<table>
+<tr><th>闸门</th><th>检查内容</th><th>实现</th></tr>
+<tr><td>schema 校验</td><td>枚举合法、absence 语义唯一、无多余字段</td><td>validator 全量自动跑（零人工成本）</td></tr>
+<tr><td>去重</td><td>合成数据最易重复</td><td>两级：label 完全相同 + 文本编辑距离阈值</td></tr>
+<tr><td>分布对齐</td><td>intent 分布与线上真实分布对照</td><td>长尾 intent 可超采样，但主干比例不得失真</td></tr>
+<tr><td>泄漏检查</td><td>训练集与评测集重叠</td><td>n-gram 重叠扫描；评测 query 及其变体绝不进训练集</td></tr>
+<tr><td>覆盖矩阵验收</td><td>第 4 章矩阵逐格打勾</td><td>缺格即回炉采集，不许带病进训练</td></tr>
+</table>
+
+<h2 id="g7">7. 阶段 4：渲染与切分</h2>
+<p>每条样本转成 messages（角色对话列表）——与线上 BuildRequest 的 JSON <strong>结构完全同构</strong>，训练的正是推理时真正要做的任务：</p>
+
+<div class="figure">
+<svg viewBox="0 0 680 450" width="100%" role="img" xmlns="http://www.w3.org/2000/svg">
+  <title>一条训练样本的解剖：messages 到 loss mask</title>
+  <desc>展示 messages 结构、chat template 渲染后的 token 序列分段，以及 loss mask 只在 assistant 段生效</desc>
+  <defs>
+    <marker id="arrow2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+  <text x="40" y="32" font-size="14" font-weight="500" fill="#EEEDFE">一条训练样本的解剖：从 messages 到 loss mask</text>
+
+  <g>
+    <rect x="40" y="52" width="360" height="252" rx="8" fill="#2C2C2A" stroke="#5F5E5A" stroke-width="0.5"/>
+    <text x="56" y="74" font-size="12" fill="#888780">messages（训练样本数据格式，与线上 BuildRequest 同构）</text>
+    <text x="56" y="96" font-size="11.5" font-family="monospace" fill="#D3D1C7">[</text>
+    <text x="56" y="114" font-size="11.5" font-family="monospace" fill="#9FE1CB"> {"role":"system",</text>
+    <text x="56" y="130" font-size="11.5" font-family="monospace" fill="#9FE1CB">  "content":"你是车载 NLU 引擎，按 nlu_10 协议输出"}</text>
+    <text x="56" y="150" font-size="11.5" font-family="monospace" fill="#9FE1CB"> {"role":"user",</text>
+    <text x="56" y="166" font-size="11.5" font-family="monospace" fill="#9FE1CB">  "content":"空调二十四度"}   ← ASR 噪声仿真</text>
+    <text x="56" y="186" font-size="11.5" font-family="monospace" fill="#FAC775"> {"role":"assistant",</text>
+    <text x="56" y="202" font-size="11.5" font-family="monospace" fill="#FAC775">  "content":"###NLU_START###</text>
+    <text x="56" y="218" font-size="11.5" font-family="monospace" fill="#FAC775">   {\"intent\":\"hvac_set\",</text>
+    <text x="56" y="234" font-size="11.5" font-family="monospace" fill="#FAC775">    \"temperature\":\"24\"}</text>
+    <text x="56" y="250" font-size="11.5" font-family="monospace" fill="#FAC775">  ###NLU_END###"}</text>
+    <text x="56" y="268" font-size="11.5" font-family="monospace" fill="#D3D1C7">]</text>
+    <text x="56" y="290" font-size="11" fill="#888780">多轮样本：user 之前插入 history 消息，格式同线上</text>
+  </g>
+
+  <g>
+    <rect x="424" y="52" width="216" height="70" rx="8" fill="#085041" stroke="#5DCAA5" stroke-width="0.5"/>
+    <text x="532" y="76" text-anchor="middle" font-size="12" font-weight="500" fill="#E1F5EE">system 段</text>
+    <text x="532" y="94" text-anchor="middle" font-size="11" fill="#9FE1CB">任务规则与协议说明</text>
+    <text x="532" y="110" text-anchor="middle" font-size="11" fill="#9FE1CB">mask（不计算 loss）</text>
+  </g>
+  <g>
+    <rect x="424" y="132" width="216" height="70" rx="8" fill="#085041" stroke="#5DCAA5" stroke-width="0.5"/>
+    <text x="532" y="156" text-anchor="middle" font-size="12" font-weight="500" fill="#E1F5EE">user 段（含历史）</text>
+    <text x="532" y="174" text-anchor="middle" font-size="11" fill="#9FE1CB">查询文本 + ASR 噪声仿真</text>
+    <text x="532" y="190" text-anchor="middle" font-size="11" fill="#9FE1CB">mask（不计算 loss）</text>
+  </g>
+  <g>
+    <rect x="424" y="212" width="216" height="92" rx="8" fill="#633806" stroke="#EF9F27" stroke-width="0.5"/>
+    <text x="532" y="238" text-anchor="middle" font-size="12" font-weight="500" fill="#FAEEDA">assistant 段</text>
+    <text x="532" y="256" text-anchor="middle" font-size="11" fill="#FAC775">nlu_10 标准答案（唯一</text>
+    <text x="532" y="272" text-anchor="middle" font-size="11" fill="#FAC775">通过 schema v2 validator</text>
+    <text x="532" y="290" text-anchor="middle" font-size="11" fill="#FAC775">的输出）→ loss = 1</text>
+  </g>
+
+  <line x1="404" y1="300" x2="420" y2="300" stroke="none"/>
+
+  <line x1="220" y1="312" x2="220" y2="336" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow2)"/>
+  <text x="260" y="330" font-size="12" fill="#888780">chat template 渲染（与线上同一模板）</text>
+
+  <text x="40" y="362" font-size="12" fill="#888780">渲染后的 token 序列（示意，非等比例）：</text>
+
+  <g>
+    <rect x="40" y="372" width="100" height="26" rx="4" fill="#085041" stroke="#5DCAA5" stroke-width="0.5"/>
+    <text x="90" y="385" text-anchor="middle" dominant-baseline="central" font-size="11" fill="#9FE1CB">模板控制 token</text>
+    <rect x="144" y="372" width="120" height="26" rx="4" fill="#085041" stroke="#5DCAA5" stroke-width="0.5"/>
+    <text x="204" y="385" text-anchor="middle" dominant-baseline="central" font-size="11" fill="#9FE1CB">system 内容</text>
+    <rect x="268" y="372" width="100" height="26" rx="4" fill="#085041" stroke="#5DCAA5" stroke-width="0.5"/>
+    <text x="318" y="385" text-anchor="middle" dominant-baseline="central" font-size="11" fill="#9FE1CB">user 内容</text>
+    <rect x="172" y="0" width="0" height="0"/>
+    <rect x="372" y="372" width="110" height="26" rx="4" fill="#085041" stroke="#5DCAA5" stroke-width="0.5"/>
+    <text x="427" y="385" text-anchor="middle" dominant-baseline="central" font-size="11" fill="#9FE1CB">生成头标记</text>
+    <rect x="486" y="372" width="154" height="26" rx="4" fill="#633806" stroke="#EF9F27" stroke-width="0.5"/>
+    <text x="563" y="385" text-anchor="middle" dominant-baseline="central" font-size="11" fill="#FAC775">assistant 输出（nlu_10）</text>
+  </g>
+
+  <g>
+    <text x="90" y="412" text-anchor="middle" font-size="11" fill="#5DCAA5">mask=0</text>
+    <text x="204" y="412" text-anchor="middle" font-size="11" fill="#5DCAA5">mask=0</text>
+    <text x="318" y="412" text-anchor="middle" font-size="11" fill="#5DCAA5">mask=0</text>
+    <text x="427" y="412" text-anchor="middle" font-size="11" fill="#5DCAA5">mask=0</text>
+    <text x="563" y="412" text-anchor="middle" font-size="11" fill="#FAC775">loss=1</text>
+  </g>
+
+  <text x="40" y="438" font-size="12" fill="#888780">loss mask 的含义：模型只学习「生成标准答案」，不学习复述输入 —— 训练目标与推理目标严格一致</text>
+</svg>
+<div class="figure-caption">图 2 · 一条训练样本的解剖：messages 结构 → 模板渲染 → loss mask</div>
+</div>
+
+<p>三个工程要点：</p>
+<ol>
+<li><strong>同一模板渲染</strong>：训练时 LLaMA-Factory 的 <code>template: qwen3</code> 与线上 GGUF 内嵌模板同源——这是「契约桥」在训练侧的执行点。</li>
+<li><strong>loss 只算 assistant 段</strong>（loss mask 见图 2 底行）：模型不学复述输入，只学生成标准答案。多轮样本中 history 段同样 mask 掉。</li>
+<li><strong>train / eval 按 intent 分层切分</strong>（stratified split，分层抽样）：每个 intent 按比例切，防止某个 intent 全进训练集导致评测集测不到它。评测集固定后<strong>冻结入库</strong>，任何人不许改。</li>
+</ol>
+
+<h2 id="g8">8. 阶段 5：LoRA SFT 实操（LLaMA-Factory）</h2>
+
+<h3>8.1 数据集登记</h3>
+<pre><code>{
+  "nlu10_sft_v1": {
+    "file_name": "nlu10_sft_v1.json",
+    "formatting": "sharegpt",
+    "columns": { "messages": "conversations" }
+  }
+}</code></pre>
+<p>数据文件用 sharegpt 格式（多轮 messages 列表），与网关的请求 JSON 同构，转换零成本。</p>
+
+<h3>8.2 训练配置（关键参数与理由）</h3>
+<pre><code>model_name_or_path: Qwen/Qwen3-0.6B
+stage: sft
+do_train: true
+finetuning_type: lora
+lora_rank: 8            # 域任务 8 够用；不收敛再升 16
+lora_alpha: 32
+lora_target: all        # 覆盖全部线性层
+template: qwen3         # 与线上 GGUF 模板同源 —— 契约点
+dataset: nlu10_sft_v1
+cutoff_len: 1024        # 单轮+短多轮足够
+packing: false          # 短结构化样本不做拼接
+train_on_prompt: false  # loss 只算 assistant 段（图 2 的 mask）
+num_train_epochs: 2.0   # 盯 eval loss，一回升立即早停
+per_device_train_batch_size: 16
+learning_rate: 1.0e-4
+val_size: 0.05          # 从训练集再留 5% 做 val loss 监控</code></pre>
+<div class="note">0.6B 规模普通 LoRA 单卡显存毫无压力（QLoRA 都不需要）；保留 LoRA（而非全参微调）的价值在于<strong>按域版本管理</strong>——nlu 域、后续新域各自一个补丁，回滚与灰度都按补丁走。</div>
+
+<h2 id="g9">9. 阶段 6–7：训后闭环与上车</h2>
+<p>SFT 产出的 LoRA merge（合并）回基座后，走标准部署产物链：</p>
+<pre><code>merge (LLaMA-Factory) 
+  → convert_hf_to_gguf.py        # HF 权重 → GGUF
+  → llama-imatrix                # 校准集就用这批 NLU query（同域！）
+  → llama-quantize               # 产 Q6_K / Q8_0 候选
+  → llama-perplexity / llama-bench / 业务评测集
+  → 全链路验收 → 上车</code></pre>
+<table>
+<tr><th>闭环要点</th><th>说明</th></tr>
+<tr><td><strong>SFT 后必须重跑量化评测</strong></td><td>输出分布变了，量化敏感度随之变化；指标：格式遵守率 / intent acc / slot F1，对比 <strong>Q8_0 锚点</strong>（对照基准），greedy + 固定 seed</td></tr>
+<tr><td><strong>imatrix 校准集 = 训练数据同域</strong></td><td>量化误差按 NLU 分布分配，而不是通用文本分布</td></tr>
+<tr><td><strong>上车后解除 /no_think 依赖</strong></td><td>训练数据的 assistant 段天然无 think（思考）——SFT 后非思考输出成为模型「母语」，/no_think 从必需品降级为保险丝；ParseResponse（解析）前置剥离逻辑常驻兜底</td></tr>
+<tr><td><strong>retry-rate 面板观察归零趋势</strong></td><td>SFT + grammar 双保险下，校验失败率应趋近 0；若爬升按「失败分桶」面板归因（详见《schema 调优设计方案》第 11 章）</td></tr>
+</table>
+
+<h2 id="g10">10. 数量与验收门槛</h2>
+<table>
+<tr><th>指标</th><th>门槛</th><th>测量方式</th></tr>
+<tr><td>数据量</td><td>1k–10k 起步，每 intent ≥ 50–200</td><td>覆盖矩阵验收</td></tr>
+<tr><td>标注质量</td><td>validator 通过率 100%；人工抽检错误率 &lt; 3%</td><td>闸门自动 + 抽检</td></tr>
+<tr><td>格式遵守率（训练后）</td><td>≥ 99.5%（相对 SFT 前的 ~95%）</td><td>评测集，greedy + seed</td></tr>
+<tr><td>intent acc 提升</td><td>SFT 后相对基座 +10pp 量级为预期合理区间（判断失败轴的修复）</td><td>评测集对照</td></tr>
+<tr><td>slot F1 提升</td><td>长尾切片（低频 intent/槽位）≤ 5pp 落后于主干</td><td>分层切片统计</td></tr>
+<tr><td>量化损失</td><td>ΔPPL ≤ 5%（对 Q8_0）；acc/F1 跌幅 ≤ 1pp</td><td>量化前后对照</td></tr>
+</table>
+
+<h2 id="g11">11. 常见坑（按踩坑频率排序）</h2>
+<table>
+<tr><th>#</th><th>坑</th><th>症状</th><th>规避</th></tr>
+<tr><td>1</td><td>schema 没定稿就开标</td><td>中途改协议，数据作废</td><td>阶段 0 双冻结，变更走版本号</td></tr>
+<tr><td>2</td><td>训练/评测泄漏</td><td>评测虚高，上车掉点</td><td>n-gram 查重 + 评测集冻结入库</td></tr>
+<tr><td>3</td><td>没有 ASR 噪声增强</td><td>干净数据训出高分，真实语音输入翻车</td><td>15–25% 样本带仿真噪声</td></tr>
+<tr><td>4</td><td>epoch 跑多</td><td>格式率升、泛化降（背训练集）</td><td>epoch 2–3 + eval loss 早停</td></tr>
+<tr><td>5</td><td>训完直接换 GGUF 不重测</td><td>量化吃掉 SFT 收益而不自知</td><td>阶段 6 红线：量化评测必重跑</td></tr>
+<tr><td>6</td><td>训练模板与线上不一致</td><td>训推分布错位，收益打折</td><td>template: qwen3 + GGUF 单一事实源</td></tr>
+</table>
+
+<h2 id="g12">12. 与既有文档的关系</h2>
+<ul>
+<li>《nlu_10 Schema 调优设计方案》：本文阶段 0 冻结的对象就是该文档的 v2 schema；其评测集五切片结构即本文 eval 集的组织方式。</li>
+<li>《模型权重与量化》：本文阶段 6 的量化评测方法、Q8_0 锚点、imatrix 同域校准全部沿用该文档第 4–5 章。</li>
+<li>《Dialogue V3 NLU-LLM 重构设计》：本文是其 S1–S5 落地顺序中 S5（LoRA SFT）的执行细则；上车后解除 /no_think 依赖、retry-rate 归零监控均回接该文档的失败出口设计。</li>
+</ul>
+
+</div>
+</body>
+</html>
