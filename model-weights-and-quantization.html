@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>模型权重与量化：原理、实操与评价（面向 WTP184 / Qwen3-0.6B）</title>
+<style>
+  :root{--bg:#0d1117;--panel:#161b22;--border:#2d3641;--text:#e6edf3;--muted:#9aa7b4;--blue:#8fbce8;--amber:#fac775;--teal:#9fe1cb;--code-bg:#131820}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:400 15px/1.75 "Segoe UI","Microsoft YaHei",sans-serif}
+  .wrap{max-width:960px;margin:0 auto;padding:48px 32px 96px}
+  h1{font-size:26px;font-weight:600;margin:0 0 8px;color:#fff}
+  .sub{color:var(--muted);font-size:14px;margin-bottom:32px}
+  h2{font-size:20px;font-weight:600;margin:56px 0 16px;padding-bottom:8px;border-bottom:1px solid var(--border);color:#fff}
+  h3{font-size:16px;font-weight:600;margin:32px 0 10px;color:var(--blue)}
+  p{margin:10px 0}
+  ul{margin:8px 0;padding-left:22px}
+  li{margin:4px 0}
+  table{border-collapse:collapse;width:100%;margin:16px 0;font-size:13.5px}
+  th{background:#1b222c;color:var(--text);text-align:left;padding:8px 12px;border:1px solid var(--border);font-weight:600}
+  td{padding:7px 12px;border:1px solid var(--border);color:#c9d4de;vertical-align:top}
+  code{font-family:Consolas,Menlo,monospace;font-size:13px;background:var(--code-bg);color:var(--blue);padding:1px 6px;border-radius:4px;border:1px solid var(--border)}
+  pre{background:var(--code-bg);border:1px solid var(--border);border-radius:8px;padding:14px 16px;overflow-x:auto}
+  pre code{background:none;border:none;padding:0;color:#a9d1f5;white-space:pre}
+  .fig{margin:24px 0;background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:16px}
+  .figcap{color:var(--muted);font-size:13px;text-align:center;margin-top:10px}
+  .note{border-left:3px solid var(--amber);background:rgba(250,199,117,.08);padding:12px 16px;border-radius:0 8px 8px 0;margin:16px 0;font-size:14px}
+  .ok{border-left:3px solid var(--teal);background:rgba(159,225,203,.07);padding:12px 16px;border-radius:0 8px 8px 0;margin:16px 0;font-size:14px}
+  .toc{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:20px 28px;font-size:14px}
+  .toc a{color:var(--blue);text-decoration:none}
+  .toc a:hover{text-decoration:underline}
+  .tag{display:inline-block;font-size:12px;padding:1px 8px;border-radius:10px;margin-right:6px;font-weight:600}
+  .p0{background:#791f1f;color:#f7c1c1}.p1{background:#633806;color:#fac775}.p2{background:#3c3489;color:#cecbf6}
+  strong{color:#fff}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>模型权重与量化：原理、实操与评价</h1>
+<div class="sub">面向 WTP184 车机 NLU / Qwen3-0.6B 部署 · 所有数字基于一手核实（HuggingFace config.json、llama.cpp 量化规范） · 2026-10-27</div>
+
+<div class="toc">
+<b>目录</b>
+<ol>
+<li><a href="#ch1">模型权重：从参数到字节</a></li>
+<li><a href="#ch2">量化原理：线性映射、粒度、误差</a></li>
+<li><a href="#ch3">量化方法全景：RTN / GPTQ / AWQ / k-quants / FP8 / QAT</a></li>
+<li><a href="#ch4">如何量化：实操流程（llama.cpp 路线）</a></li>
+<li><a href="#ch5">如何评价模型效果：四维度 + 方法论</a></li>
+<li><a href="#ch6">落地建议：0.6B 车机 NLU 的量化选型</a></li>
+</ol>
+</div>
+
+<h2 id="ch1">1. 模型权重：从参数到字节</h2>
+<p><b>权重就是训练学到的参数张量。</b>一个 Transformer 的权重 = 每层的 4 个注意力投影矩阵（Wq/Wk/Wv/Wo）+ 3 个 FFN 矩阵（gate/up/down）+ 归一化向量 + Embedding 表（与输出层可共享）。推理阶段权重<strong>只读不更新</strong>——这是它能被离线量化的根本原因。</p>
+
+<h3>1.1 参数量怎么算（以 Qwen3-0.6B 为例）</h3>
+<p>config.json 的每个字段都直接映射到参数量。Qwen3-0.6B：<code>hidden_size=1024</code>、<code>num_hidden_layers=28</code>、<code>16 query 头 / 8 KV 头</code>（GQA）、<code>head_dim=128</code>、<code>intermediate_size=3072</code>、<code>vocab_size=151,936</code>、<code>tie_word_embeddings=true</code>。</p>
+<table>
+<tr><th>组件</th><th>计算</th><th>参数量</th><th>占比</th></tr>
+<tr><td>Attention（每层）</td><td>Wq 1024×2048 + Wk/Wv 2×1024×1024 + Wo 2048×1024</td><td>6.29M</td><td rowspan="3">×28 层</td></tr>
+<tr><td>FFN（每层）</td><td>gate/up/down 3×1024×3072</td><td>9.44M</td></tr>
+<tr><td>Norms（每层）</td><td>2×RMSNorm + QK-Norm</td><td>2.3K</td></tr>
+<tr><td>Embedding（tied）</td><td>151,936 × 1024（输入输出共享一份）</td><td>155.6M</td><td>26.1%</td></tr>
+<tr><td><b>总计</b></td><td colspan="2"><b>596,049,920</b></td><td>100%</td></tr>
+</table>
+<div class="note"><b>小模型特有现象</b>：Embedding 占 26%（同词表在 8B 模型里只占 ~4%）。词表成本是固定的，不随模型缩放——所以 0.6B 量化时 embedding 张量常被单独保留更高精度（部分量化工具默认如此），它是"性价比最高的一块保护"。</div>
+
+<h3>1.2 数值格式：位分配决定「动态范围 vs 精度」</h3>
+<div class="fig"><svg viewBox="0 0 680 690" width="100%" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>模型权重：参数构成、数值格式与大小测算</title>
+<desc>以 Qwen3-0.6B 为例：参数量分解、FP32 到 INT4 的位分配、各量化格式的文件大小表与 KV cache 测算。</desc>
+<defs>
+  <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+</defs>
+<style>.th{font-family:sans-serif;font-size:14px;font-weight:500;fill:#E6EDF3}.ts{font-family:sans-serif;font-size:12px;fill:#9AA7B4}.tb{font-family:sans-serif;font-size:12.5px;fill:#C9D4DE}.tm{font-family:monospace;font-size:12px;fill:#8FBCE8}</style>
+
+<text class="th" x="40" y="30">模型权重：参数构成 · 数值格式 · 大小测算（Qwen3-0.6B 实例）</text>
+<text class="ts" x="40" y="48">权重 = 训练学到的参数张量（Wq/Wk/Wv/Wo、FFN 矩阵、Embedding 表）；推理阶段只读不更新</text>
+
+<rect x="40" y="62" width="600" height="80" rx="8" fill="#161B22" stroke="#2D3641" stroke-width="0.5"/>
+<text class="tb" x="56" y="84">每层 = Attention（Wq 1024×2048 + Wk/Wv 1024×1028×2 + Wo 2048×1024 ≈ 6.29M）</text>
+<text class="tb" x="56" y="104">           + FFN（gate/up/down 3×1024×3072 ≈ 9.44M）+ QK/RMSNorm ≈ 15.7M，共 28 层</text>
+<text class="tb" x="56" y="126">Embedding 151,936 × 1024 = 155.6M（输入/输出共享 tie_word_embeddings）→ 总计 596,049,920 参数</text>
+
+<rect x="40" y="154" width="266" height="26" fill="#0C447C" stroke="#85B7EB" stroke-width="0.5"/>
+<rect x="306" y="154" width="177" height="26" fill="#3C3489" stroke="#AFA9EC" stroke-width="0.5"/>
+<rect x="483" y="154" width="156" height="26" fill="#633806" stroke="#FAC775" stroke-width="0.5"/>
+<rect x="639" y="154" width="1.5" height="26" fill="#5F5E5A"/>
+<text x="173" y="167" text-anchor="middle" dominant-baseline="central" style="font-family:sans-serif;font-size:11px;fill:#B5D4F4">FFN 264.2M · 44.3%</text>
+<text x="394" y="167" text-anchor="middle" dominant-baseline="central" style="font-family:sans-serif;font-size:11px;fill:#CECBF6">Attention 176.2M · 29.5%</text>
+<text x="561" y="167" text-anchor="middle" dominant-baseline="central" style="font-family:sans-serif;font-size:10.5px;fill:#FAC775">Embed 155.6M · 26%</text>
+<text class="ts" x="40" y="194">小模型特性：Embedding 占 26%（8B 模型里同词表仅 ~4%）→ 量化时 embedding 常被单独高精度处理</text>
+
+<text class="th" x="40" y="224">数值格式：位分配决定「动态范围 vs 精度」</text>
+
+<text class="tb" x="56" y="248">FP32</text>
+<rect x="140" y="240" width="12" height="16" fill="#791F1F"/><rect x="152" y="240" width="96" height="16" fill="#633806"/><rect x="248" y="240" width="276" height="16" fill="#0C447C"/>
+<text x="200" y="248" text-anchor="middle" dominant-baseline="central" style="font-family:sans-serif;font-size:10.5px;fill:#FAC775">e ×8</text>
+<text x="386" y="248" text-anchor="middle" dominant-baseline="central" style="font-family:sans-serif;font-size:10.5px;fill:#B5D4F4">m ×23</text>
+<text class="ts" x="536" y="248">4B · 训练精度</text>
+
+<text class="tb" x="56" y="274">FP16</text>
+<rect x="140" y="266" width="12" height="16" fill="#791F1F"/><rect x="152" y="266" width="60" height="16" fill="#633806"/><rect x="212" y="266" width="120" height="16" fill="#0C447C"/>
+<text x="182" y="274" text-anchor="middle" dominant-baseline="central" style="font-family:sans-serif;font-size:10.5px;fill:#FAC775">e ×5</text>
+<text x="272" y="274" text-anchor="middle" dominant-baseline="central" style="font-family:sans-serif;font-size:10.5px;fill:#B5D4F4">m ×10</text>
+<text class="ts" x="348" y="274">2 字节 · 范围窄（±65504）、精度高</text>
+
+<text class="tb" x="56" y="300">BF16</text>
+<rect x="140" y="292" width="12" height="16" fill="#791F1F"/><rect x="152" y="292" width="96" height="16" fill="#633806"/><rect x="248" y="292" width="84" height="16" fill="#0C447C"/>
+<text x="200" y="300" text-anchor="middle" dominant-baseline="central" style="font-family:sans-serif;font-size:10.5px;fill:#FAC775">e ×8</text>
+<text x="290" y="300" text-anchor="middle" dominant-baseline="central" style="font-family:sans-serif;font-size:10.5px;fill:#B5D4F4">m ×7</text>
+<text class="ts" x="348" y="300">2 字节 · 范围同 FP32 · LLM 训练/推理事实标准</text>
+
+<text class="tb" x="56" y="326">FP8 E4M3</text>
+<rect x="140" y="318" width="12" height="16" fill="#791F1F"/><rect x="152" y="318" width="48" height="16" fill="#633806"/><rect x="200" y="318" width="36" height="16" fill="#0C447C"/>
+<text x="218" y="326" text-anchor="middle" dominant-baseline="central" style="font-family:sans-serif;font-size:10.5px;fill:#FAC775">e×4</text>
+<text class="ts" x="252" y="326">1 字节 · GPU 硬件原生（Hopper/Blackwell）</text>
+
+<text class="tb" x="56" y="352">INT8</text>
+<rect x="140" y="344" width="96" height="16" fill="#085041" stroke="#9FE1CB" stroke-width="0.5"/>
+<text x="188" y="352" text-anchor="middle" dominant-baseline="central" style="font-family:sans-serif;font-size:10.5px;fill:#9FE1CB">整数 ×8</text>
+<text class="ts" x="252" y="352">均匀格点 · 需 scale/zero-point 映射</text>
+
+<text class="tb" x="56" y="378">INT4</text>
+<rect x="140" y="370" width="48" height="16" fill="#085041" stroke="#9FE1CB" stroke-width="0.5"/>
+<text x="164" y="378" text-anchor="middle" dominant-baseline="central" style="font-family:sans-serif;font-size:10.5px;fill:#9FE1CB">×4</text>
+<text class="ts" x="252" y="378">0.5 字节/权重 · 仅有 16 个格点 · 压缩极限</text>
+
+<rect x="140" y="394" width="8" height="8" fill="#791F1F"/><text class="ts" x="152" y="402">符号位</text>
+<rect x="196" y="394" width="8" height="8" fill="#633806"/><text class="ts" x="208" y="402">指数 = 动态范围</text>
+<rect x="296" y="394" width="8" height="8" fill="#0C447C"/><text class="ts" x="308" y="402">尾数 = 精度</text>
+<rect x="380" y="394" width="8" height="8" fill="#085041"/><text class="ts" x="392" y="402">整数 = 均匀格点（浮点是非均匀格点）</text>
+
+<text class="th" x="40" y="434">Qwen3-0.6B 各格式大小（文件大小 ≈ 参数量 × bpw ÷ 8）</text>
+
+<rect x="40" y="448" width="600" height="20" fill="#1B222C"/>
+<text class="ts" x="56" y="458" dominant-baseline="central">格式</text><text class="ts" x="140" y="458" dominant-baseline="central">bpw</text><text class="ts" x="180" y="458" dominant-baseline="central">相对大小</text><text class="ts" x="390" y="458" dominant-baseline="central">体积</text><text class="ts" x="450" y="458" dominant-baseline="central">备注</text>
+
+<g>
+<rect x="40" y="468" width="600" height="21" fill="#131820"/><text class="tb" x="56" y="479" dominant-baseline="central">F16 / BF16</text><text class="tb" x="140" y="479" dominant-baseline="central">16.0</text><rect x="180" y="472" width="200" height="12" fill="#2E5C8A"/><text class="tb" x="390" y="479" dominant-baseline="central">1.19 GB</text><text class="ts" x="450" y="479" dominant-baseline="central">基准（磁盘 = 显存）</text>
+<rect x="40" y="489" width="600" height="21" fill="#161B22" stroke="#FAC775" stroke-width="0.5"/><text class="tb" x="56" y="500" dominant-baseline="central">Q8_0</text><text class="tb" x="140" y="500" dominant-baseline="central">8.5</text><rect x="180" y="493" width="106" height="12" fill="#B8863B"/><text class="tb" x="390" y="500" dominant-baseline="central">0.63 GB</text><text class="ts" x="450" y="500" dominant-baseline="central">≈无损 · 官方常发货位</text>
+<rect x="40" y="510" width="600" height="21" fill="#131820"/><text class="tb" x="56" y="521" dominant-baseline="central">Q6_K</text><text class="tb" x="140" y="521" dominant-baseline="central">6.56</text><rect x="180" y="514" width="82" height="12" fill="#2E5C8A"/><text class="tb" x="390" y="521" dominant-baseline="central">0.49 GB</text><text class="ts" x="450" y="521" dominant-baseline="central">近无损</text>
+<rect x="40" y="531" width="600" height="21" fill="#161B22"/><text class="tb" x="56" y="542" dominant-baseline="central">Q5_K_M</text><text class="tb" x="140" y="542" dominant-baseline="central">5.70</text><rect x="180" y="536" width="72" height="12" fill="#2E5C8A"/><text class="tb" x="390" y="542" dominant-baseline="central">0.43 GB</text><text class="ts" x="450" y="542" dominant-baseline="central">质量敏感场景</text>
+<rect x="40" y="552" width="600" height="21" fill="#131820" stroke="#FAC775" stroke-width="0.5"/><text class="tb" x="56" y="563" dominant-baseline="central">Q4_K_M</text><text class="tb" x="140" y="563" dominant-baseline="central">4.89</text><rect x="180" y="557" width="62" height="12" fill="#B8863B"/><text class="tb" x="390" y="563" dominant-baseline="central">0.37 GB</text><text class="ts" x="450" y="563" dominant-baseline="central">体积/质量甜点 · 社区默认</text>
+<rect x="40" y="573" width="600" height="21" fill="#161B22"/><text class="tb" x="56" y="584" dominant-baseline="central">Q3_K_M</text><text class="tb" x="140" y="584" dominant-baseline="central">4.00</text><rect x="180" y="578" width="50" height="12" fill="#2E5C8A"/><text class="tb" x="390" y="584" dominant-baseline="central">0.30 GB</text><text class="ts" x="450" y="584" dominant-baseline="central">0.6B 级小模型慎用</text>
+<rect x="40" y="594" width="600" height="21" fill="#131820"/><text class="tb" x="56" y="605" dominant-baseline="central">Q2_K</text><text class="tb" x="140" y="605" dominant-baseline="central">3.16</text><rect x="180" y="599" width="40" height="12" fill="#2E5C8A"/><text class="tb" x="390" y="605" dominant-baseline="central">0.24 GB</text><text class="ts" x="450" y="605" dominant-baseline="central">明显退化 · 仅极限场景</text>
+</g>
+
+<rect x="40" y="626" width="600" height="48" rx="8" fill="#161B22" stroke="#2D3641" stroke-width="0.5"/>
+<text class="tb" x="56" y="644">运行内存 = 权重 + KV cache + 运行时开销（10~20%）</text>
+<text class="tb" x="56" y="664">KV ≈ 2 × 28 层 × 8 KV头 × 128 维 × 2B ≈ 112KB/token → 4K 上下文 ≈ 448MB（q8_0 KV 可减半）</text>
+</svg>
+<div class="figcap">图 1 · 参数构成、数值格式位分配与各量化格式大小（Qwen3-0.6B 实例）</div></div>
+<p>浮点数由<strong>符号位 + 指数 + 尾数</strong>构成：指数位数决定<strong>动态范围</strong>（能表示多大/多小的数），尾数位数决定<strong>精度</strong>（格点密不密）。</p>
+<ul>
+<li><b>FP32</b>：训练默认，4 字节，推理浪费；</li>
+<li><b>FP16 vs BF16</b>：都是 2 字节，但 FP16 是「e5m10」（范围窄 ±65504、精度高），BF16 是「e8m7」（范围同 FP32、精度低 8 倍）。LLM 训练/推理选 BF16 是因为<strong>激活值范围大</strong>，BF16 溢出风险小——这也是后面 outlier 问题的伏笔；</li>
+<li><b>FP8（E4M3/E5M2）</b>：把浮点压到 1 字节，Hopper/Blackwell GPU 硬件原生支持，是「不改数值含义的量化」；</li>
+<li><b>INT8/INT4</b>：整数格点是<strong>均匀</strong>的，浮点是<strong>非均匀</strong>的（小数附近密、大数附近疏）。整数量化必须做线性映射（scale/zero-point），这是第 2 章的主题。</li>
+</ul>
+
+<h3>1.3 大小测算公式（部署前必算）</h3>
+<pre><code>文件大小   ≈ 参数量 × bpw ÷ 8              （bpw = bits per weight，见下表）
+运行内存   = 权重 + KV cache + 运行时开销(10~20%)
+KV cache  ≈ 2 × 层数 × KV头数 × head_dim × 每token字节数 × 上下文长度
+             Qwen3-0.6B: 2×28×8×128×2B ≈ 112KB/token → 4K 上下文 ≈ 448MB</code></pre>
+<div class="ok"><b>经验法则</b>：车机 4K 上下文时，0.6B 的 KV cache（448MB）可能<strong>比 Q4_K_M 权重本体（0.37GB）还大</strong>。只盯权重大小会踩坑——上下文长度和 KV 量化（<code>--cache-type-k q8_0</code>）同样是内存杠杆。</div>
+
+<h2 id="ch2">2. 量化原理：线性映射、粒度、误差</h2>
+<div class="fig"><svg viewBox="0 0 680 640" width="100%" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>量化原理：线性映射、粒度与误差来源</title>
+<desc>仿射量化公式、对称与非对称量化、per-tensor/per-channel/per-group 粒度、round-off 与 outlier 误差、权重-only/W+A/KV 三档量化对象。</desc>
+<defs>
+  <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+</defs>
+<style>.th{font-family:sans-serif;font-size:14px;font-weight:500;fill:#E6EDF3}.ts{font-family:sans-serif;font-size:12px;fill:#9AA7B4}.tb{font-family:sans-serif;font-size:12.5px;fill:#C9D4DE}.tm{font-family:monospace;font-size:12px;fill:#8FBCE8}</style>
+
+<text class="th" x="40" y="30">量化原理：线性映射 · 粒度 · 误差</text>
+
+<rect x="40" y="50" width="600" height="88" rx="8" fill="#0C447C" stroke="#85B7EB" stroke-width="0.5"/>
+<text class="th" x="56" y="72" fill="#B5D4F4">仿射量化（所有整数量化的数学核心）</text>
+<text class="tm" x="56" y="96">量化   q = round(x / s) + z        INT4 时 q ∈ [−8, +7]（仅 16 个格点）</text>
+<text class="tm" x="56" y="116">反量化 x̂ = (q − z) × s             s = (x_max − x_min) / (q_max − q_min)</text>
+<text class="tb" x="56" y="132" fill="#B5D4F4">单权重误差 |x − x̂| ≤ s/2：步长 s 越小精度越高，但可表示的数值范围越窄</text>
+
+<rect x="40" y="152" width="292" height="104" rx="8" fill="#161B22" stroke="#2D3641" stroke-width="0.5"/>
+<text class="th" x="56" y="176">对称量化（z = 0）</text>
+<text class="ts" x="56" y="196">s = max|x| / 127 · 适合近似对称分布（权重）</text>
+<line x1="64" y1="222" x2="300" y2="222" stroke="#85B7EB" stroke-width="1" marker-end="url(#arrow)"/>
+<line x1="182" y1="216" x2="182" y2="228" stroke="#FAC775" stroke-width="1.5"/>
+<text class="ts" x="72" y="240">−127</text><text class="ts" x="176" y="240">0</text><text class="ts" x="280" y="240">+127</text>
+
+<rect x="348" y="152" width="292" height="104" rx="8" fill="#161B22" stroke="#2D3641" stroke-width="0.5"/>
+<text class="th" x="364" y="176">非对称量化（z ≠ 0）</text>
+<text class="ts" x="364" y="196">适配偏移分布（ReLU 后激活全为正）</text>
+<line x1="372" y1="222" x2="608" y2="222" stroke="#85B7EB" stroke-width="1" marker-end="url(#arrow)"/>
+<line x1="470" y1="216" x2="470" y2="228" stroke="#FAC775" stroke-width="1.5"/>
+<text class="ts" x="380" y="240">x_min</text><text class="ts" x="456" y="240">z(零点)</text><text class="ts" x="580" y="240">x_max</text>
+
+<rect x="40" y="270" width="600" height="146" rx="8" fill="#161B22" stroke="#2D3641" stroke-width="0.5"/>
+<text class="th" x="56" y="294">粒度：scale 共享多少权重（越小越准、元数据越多）</text>
+<rect x="56" y="308" width="180" height="92" rx="8" fill="#3C3489" stroke="#AFA9EC" stroke-width="0.5"/>
+<text class="th" x="146" y="330" text-anchor="middle" fill="#CECBF6">per-tensor</text>
+<text class="ts" x="146" y="350" text-anchor="middle">整矩阵 1 组 (s, z)</text>
+<text class="ts" x="146" y="368" text-anchor="middle">元数据最省</text>
+<text class="ts" x="146" y="386" text-anchor="middle">误差最大</text>
+<rect x="250" y="308" width="180" height="92" rx="8" fill="#0C447C" stroke="#85B7EB" stroke-width="0.5"/>
+<text class="th" x="340" y="330" text-anchor="middle" fill="#B5D4F4">per-channel</text>
+<text class="ts" x="340" y="350" text-anchor="middle">每个输出通道 1 组</text>
+<text class="ts" x="340" y="368" text-anchor="middle">数百~数千组</text>
+<text class="ts" x="340" y="386" text-anchor="middle">W8 主流做法</text>
+<rect x="444" y="308" width="180" height="92" rx="8" fill="#633806" stroke="#FAC775" stroke-width="0.5"/>
+<text class="th" x="534" y="330" text-anchor="middle" fill="#FAC775">per-group</text>
+<text class="ts" x="534" y="350" text-anchor="middle">每 32/256 权重 1 组</text>
+<text class="ts" x="534" y="368" text-anchor="middle">GGUF k-quant super-block</text>
+<text class="ts" x="534" y="386" text-anchor="middle">scale 本身用 6bit 再压缩</text>
+
+<rect x="40" y="432" width="292" height="118" rx="8" fill="#161B22" stroke="#2D3641" stroke-width="0.5"/>
+<text class="th" x="56" y="456">误差来源 ① round-off</text>
+<text class="ts" x="56" y="478">每个权重 ±s/2 的舍入噪声，</text>
+<text class="ts" x="56" y="496">单看微小，经 28 层矩阵乘累积</text>
+<text class="ts" x="56" y="514">后放大 → 表现为 logits 抖动、</text>
+<text class="ts" x="56" y="532">近并列 token 翻转</text>
+
+<rect x="348" y="432" width="292" height="118" rx="8" fill="#161B22" stroke="#2D3641" stroke-width="0.5"/>
+<text class="th" x="364" y="456">误差来源 ② outlier（主要矛盾）</text>
+<text class="ts" x="364" y="478">LLM 激活存在系统性离群通道；</text>
+<text class="ts" x="364" y="496">若按 max 定 s，99% 的普通值</text>
+<text class="ts" x="364" y="514">被挤进极窄格点 → 误差暴涨。</text>
+<text class="ts" x="364" y="532">AWQ / SmoothQuant 均为此而生</text>
+
+<rect x="40" y="566" width="600" height="56" rx="8" fill="#085041" stroke="#9FE1CB" stroke-width="0.5"/>
+<text class="th" x="56" y="588" fill="#9FE1CB">量化对象三档</text>
+<text class="tb" x="56" y="608" fill="#E1F5EE">权重-only（W4A16，llama.cpp 路线，权重静态可离线） · 权重+激活（W8A8，GPU 整数 kernel 端到端加速） · KV cache（q8_0，上下文内存减半）</text>
+</svg>
+<div class="figcap">图 2 · 仿射量化、对称/非对称、三种粒度、两类误差、三档量化对象</div></div>
+
+<h3>2.1 仿射量化：一条公式讲完全部</h3>
+<pre><code>量化    q = round(x / s) + z          INT4 时 q ∈ [−8, +7]，仅 16 个格点
+反量化  x̂ = (q − z) × s               s = (x_max − x_min)/(q_max − q_min)</code></pre>
+<p>整数量化 = 把连续的浮点权重<strong>吸附到有限个均匀格点</strong>上。单权重误差上界 <code>|x − x̂| ≤ s/2</code>：步长越小越准，但可表示范围越窄。所有量化格式的差异，本质上都是「<strong>怎么分组定 s</strong>（粒度）+ <strong>怎么补偿误差</strong>（方法）」。</p>
+<ul>
+<li><b>对称量化（z=0）</b>：适合近似对称分布的<strong>权重</strong>；</li>
+<li><b>非对称量化（z≠0）</b>：适合偏移分布（ReLU 后激活全为正）。</li>
+</ul>
+
+<h3>2.2 粒度：scale 共享多少权重</h3>
+<table>
+<tr><th>粒度</th><th>scale 数量</th><th>特点</th><th>典型用途</th></tr>
+<tr><td>per-tensor</td><td>每矩阵 1 组</td><td>元数据最省、误差最大</td><td>早期 W8</td></tr>
+<tr><td>per-channel</td><td>每输出通道 1 组（数百~数千）</td><td>主流平衡点</td><td>W8/AWQ/GPTQ</td></tr>
+<tr><td>per-group</td><td>每 32/256 个权重 1 组</td><td>误差最小；scale 本身再用 6bit 压缩（k-quant super-block），抵消元数据膨胀</td><td>GGUF k-quants（端侧 4bit 的可行性基础）</td></tr>
+</table>
+<p>这是 llama.cpp 能把 4bit 做到可用的关键：<code>Q4_K_M</code> 名义 4bit，实际 ~4.89 bpw——多出来的 0.89 bit 就是分组 scale 的开销，换来的是精度大幅回升。</p>
+
+<h3>2.3 误差从哪来</h3>
+<ul>
+<li><b>round-off（舍入噪声）</b>：每权重 ±s/2 的均匀噪声，单看微小，经 28 层矩阵乘<strong>累积放大</strong>，最终表现为 logits 抖动、近并列 token 翻转（top-1 改变）——对你们 nlu_10 这种<strong>严格格式输出</strong>，这正是 marker 偶发 miss 的微观机制，grammar 约束是兜底，量化选型是源头；</li>
+<li><b>outlier（主要矛盾）</b>：LLM 激活存在<strong>系统性</strong>离群通道（少数维度数值比其他大 100 倍）。若按 max 定 s，99% 的普通值被挤进极窄格点 → 误差暴涨。GPTQ/AWQ/SmoothQuant 三大方法全为解决它而生。</li>
+</ul>
+
+<h3>2.4 量化对象三档</h3>
+<table>
+<tr><th>档位</th><th>记法</th><th>谁被量化</th><th>收益与代价</th></tr>
+<tr><td>权重-only</td><td>W4A16 / W8A16</td><td>权重（静态、可离线）</td><td>内存/带宽省；激活仍浮点。llama.cpp 全家在此档</td></tr>
+<tr><td>权重+激活</td><td>W8A8</td><td>两者都要量化</td><td>GPU 整数 kernel 端到端加速；激活是动态的 → 难点在 outlier（SmoothQuant）</td></tr>
+<tr><td>KV cache</td><td>q8_0 KV</td><td>注意力缓存</td><td>上下文内存减半，长上下文收益最大；质量影响通常很小</td></tr>
+</table>
+
+<h2 id="ch3">3. 量化方法全景</h2>
+<div class="fig"><svg viewBox="0 0 680 660" width="100%" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>量化方法全景：按代价与量化对象分类</title>
+<desc>PTQ 训练后量化方法（RTN、GPTQ、AWQ、GGUF k-quants/IQ、SmoothQuant、FP8、NVFP4）与训练侧方法（QAT、QLoRA）的对比卡片。</desc>
+<style>.th{font-family:sans-serif;font-size:14px;font-weight:500;fill:#E6EDF3}.ts{font-family:sans-serif;font-size:11.5px;fill:#9AA7B4}.tb{font-family:sans-serif;font-size:12px;fill:#C9D4DE}.rl{font-family:sans-serif;font-size:12.5px;font-weight:500;fill:#FAC775}</style>
+
+<text class="th" x="40" y="30">量化方法全景：不需要重训（PTQ）为主流，训练侧（QAT/QLoRA）做恢复</text>
+
+<text class="rl" x="40" y="66">PTQ · 权重-only（校准数据可选~必需，无需训练）</text>
+<rect x="40" y="78" width="146" height="128" rx="8" fill="#161B22" stroke="#2D3641" stroke-width="0.5"/>
+<text class="th" x="113" y="100" text-anchor="middle">RTN</text>
+<text class="ts" x="113" y="120" text-anchor="middle">round-to-nearest</text>
+<text class="ts" x="113" y="138" text-anchor="middle">朴素取整基线</text>
+<text class="ts" x="113" y="156" text-anchor="middle">零校准零成本</text>
+<text class="ts" x="113" y="174" text-anchor="middle">8bit 尚可 4bit 损伤大</text>
+<rect x="194" y="78" width="146" height="128" rx="8" fill="#0C447C" stroke="#85B7EB" stroke-width="0.5"/>
+<text class="th" x="267" y="100" text-anchor="middle" fill="#B5D4F4">GPTQ</text>
+<text class="ts" x="267" y="120" text-anchor="middle">逐层 Hessian 误差补偿</text>
+<text class="ts" x="267" y="138" text-anchor="middle">最小化 ‖W·X − Ŵ·X‖²</text>
+<text class="ts" x="267" y="156" text-anchor="middle">需校准集 128~512 条</text>
+<text class="ts" x="267" y="174" text-anchor="middle">GPU 生态 4bit 主流</text>
+<rect x="348" y="78" width="146" height="128" rx="8" fill="#0C447C" stroke="#85B7EB" stroke-width="0.5"/>
+<text class="th" x="421" y="100" text-anchor="middle" fill="#B5D4F4">AWQ</text>
+<text class="ts" x="421" y="120" text-anchor="middle">激活感知通道缩放</text>
+<text class="ts" x="421" y="138" text-anchor="middle">激活大的通道=salient</text>
+<text class="ts" x="421" y="156" text-anchor="middle">按激活幅度保护权重列</text>
+<text class="ts" x="421" y="174" text-anchor="middle">与 GPTQ 同级 · 二选一</text>
+<rect x="502" y="78" width="138" height="128" rx="8" fill="#633806" stroke="#FAC775" stroke-width="0.5"/>
+<text class="th" x="571" y="100" text-anchor="middle" fill="#FAC775">k-quants / IQ</text>
+<text class="ts" x="571" y="120" text-anchor="middle">GGUF super-block 分组</text>
+<text class="ts" x="571" y="138" text-anchor="middle">256 权重/组+6bit scale</text>
+<text class="ts" x="571" y="156" text-anchor="middle">IQ 系列配 imatrix</text>
+<text class="ts" x="571" y="174" text-anchor="middle">llama.cpp/端侧生态</text>
+
+<text class="rl" x="40" y="234">PTQ · 权重+激活 / 硬件原生浮点（GPU serving 路线）</text>
+<rect x="40" y="246" width="194" height="128" rx="8" fill="#161B22" stroke="#2D3641" stroke-width="0.5"/>
+<text class="th" x="137" y="268" text-anchor="middle">SmoothQuant</text>
+<text class="ts" x="137" y="290" text-anchor="middle">激活 outlier 平滑迁移</text>
+<text class="ts" x="137" y="308" text-anchor="middle">到权重（数学等价缩放）</text>
+<text class="ts" x="137" y="326" text-anchor="middle">让 W 与 A 都能整数量化</text>
+<text class="ts" x="137" y="344" text-anchor="middle">W8A8 kernel 端到端加速</text>
+<rect x="242" y="246" width="194" height="128" rx="8" fill="#3C3489" stroke="#AFA9EC" stroke-width="0.5"/>
+<text class="th" x="339" y="268" text-anchor="middle" fill="#CECBF6">FP8（E4M3/E5M2）</text>
+<text class="ts" x="339" y="290" text-anchor="middle">浮点 8bit，保留动态范围</text>
+<text class="ts" x="339" y="308" text-anchor="middle">无需整数映射技巧</text>
+<text class="ts" x="339" y="326" text-anchor="middle">Hopper/Blackwell 原生</text>
+<text class="ts" x="339" y="344" text-anchor="middle">TRT-LLM/vLLM 主推</text>
+<rect x="444" y="246" width="196" height="128" rx="8" fill="#3C3489" stroke="#AFA9EC" stroke-width="0.5"/>
+<text class="th" x="542" y="268" text-anchor="middle" fill="#CECBF6">NVFP4 / MXFP4</text>
+<text class="ts" x="542" y="290" text-anchor="middle">块级 micro-scaling</text>
+<text class="ts" x="542" y="308" text-anchor="middle">每 16/32 元素 1 个块 scale</text>
+<text class="ts" x="542" y="326" text-anchor="middle">Blackwell 4bit 端到端</text>
+<text class="ts" x="542" y="344" text-anchor="middle">最新一代，近乎无损</text>
+
+<text class="rl" x="40" y="402">训练侧（量化后精度恢复 / 量化上训练）</text>
+<rect x="40" y="414" width="194" height="128" rx="8" fill="#161B22" stroke="#2D3641" stroke-width="0.5"/>
+<text class="th" x="137" y="436" text-anchor="middle">QAT</text>
+<text class="ts" x="137" y="458" text-anchor="middle">训练中插入伪量化节点</text>
+<text class="ts" x="137" y="476" text-anchor="middle">前向模拟量化噪声</text>
+<text class="ts" x="137" y="494" text-anchor="middle">低位宽精度恢复最佳</text>
+<text class="ts" x="137" y="512" text-anchor="middle">需要训练资源与数据</text>
+<rect x="242" y="414" width="194" height="128" rx="8" fill="#085041" stroke="#9FE1CB" stroke-width="0.5"/>
+<text class="th" x="339" y="436" text-anchor="middle" fill="#9FE1CB">QLoRA（NF4）</text>
+<text class="ts" x="339" y="458" text-anchor="middle">冻结 4bit 量化底座</text>
+<text class="ts" x="339" y="476" text-anchor="middle">只训练低秩 LoRA 适配器</text>
+<text class="ts" x="339" y="494" text-anchor="middle">0.6B 微调 ~6GB 显存</text>
+<text class="ts" x="339" y="512" text-anchor="middle">你们的 nlu_10 SFT 可用</text>
+<rect x="444" y="414" width="196" height="128" rx="8" fill="#791F1F" stroke="#F7C1C1" stroke-width="0.5"/>
+<text class="th" x="542" y="436" text-anchor="middle" fill="#F7C1C1">选型速查</text>
+<text class="ts" x="542" y="458" text-anchor="middle">llama.cpp / 车机端侧</text>
+<text class="ts" x="542" y="476" text-anchor="middle">→ k-quants + imatrix</text>
+<text class="ts" x="542" y="494" text-anchor="middle">GPU serving → FP8/W8A8</text>
+<text class="ts" x="542" y="512" text-anchor="middle">精度极限恢复 → QAT</text>
+
+<rect x="40" y="566" width="600" height="72" rx="8" fill="#161B22" stroke="#2D3641" stroke-width="0.5"/>
+<text class="tb" x="56" y="590">共同思想：量化误差集中在「少数重要通道/权重」上代价最大 —— GPTQ 用二阶信息找补偿方向，</text>
+<text class="tb" x="56" y="610">AWQ 用激活幅度找重要列，imatrix 用领域数据统计重要性。校准集越贴近真实分布，量化越准。</text>
+<text class="tb" x="56" y="630">FP8/NVFP4 走另一条路：不改数值含义，让硬件直接支持低精度浮点运算。</text>
+</svg>
+<div class="figcap">图 3 · PTQ（训练后量化）与训练侧方法全景</div></div>
+<table>
+<tr><th>方法</th><th>比特/对象</th><th>需要校准集？</th><th>一句话原理</th><th>适用</th></tr>
+<tr><td>RTN</td><td>任意 / W</td><td>否</td><td>朴素取整，零成本基线</td><td>8bit 够用；4bit 损伤大</td></tr>
+<tr><td>GPTQ</td><td>4~8 / W</td><td>是（128~512 条）</td><td>逐层用 Hessian 二阶信息求解「量化哪个权重的误差最小」，边量化边补偿</td><td>GPU 生态 4bit 主流</td></tr>
+<tr><td>AWQ</td><td>4~8 / W</td><td>是（快）</td><td>激活幅度大的通道 = salient；对它们做 per-channel 等价缩放保护，无需反向传播</td><td>与 GPTQ 同级，二选一</td></tr>
+<tr><td>k-quants / IQ</td><td>2~8 / W</td><td>可选（imatrix）</td><td>super-block 分组 + 6bit scale；IQ 系列用重要性矩阵分配比特</td><td><b>llama.cpp / 端侧（你们的主路径）</b></td></tr>
+<tr><td>SmoothQuant</td><td>W8A8</td><td>是</td><td>把激活 outlier 数学等价地迁移到权重，让 W/A 双方能整数量化</td><td>GPU serving</td></tr>
+<tr><td>FP8 (E4M3)</td><td>8 / W+A</td><td>轻</td><td>浮点 8bit 保留动态范围，硬件原生，无需整数映射技巧</td><td>TRT-LLM / vLLM（Hopper+）</td></tr>
+<tr><td>NVFP4/MXFP4</td><td>4 / W+A</td><td>轻</td><td>块级 micro-scaling：每 16/32 元素一个块 scale</td><td>Blackwell 最新代</td></tr>
+<tr><td>QAT</td><td>任意</td><td>训练数据</td><td>训练中插伪量化节点，前向模拟量化噪声</td><td>低位宽精度恢复最佳</td></tr>
+<tr><td>QLoRA (NF4)</td><td>4 / W（训练侧）</td><td>训练数据</td><td>冻结 4bit 底座 + LoRA 适配器；0.6B 微调 ~6GB 显存</td><td>你们的 nlu_10 SFT 路线</td></tr>
+</table>
+<div class="ok"><b>共同思想</b>：量化误差代价集中在「少数重要通道」——GPTQ 用二阶信息找补偿方向，AWQ 用激活幅度找重要列，imatrix 用领域数据统计重要性。<strong>校准集越贴近真实分布，量化越准</strong>——这就是为什么第 4 章坚持用你们 NLU 领域 query 做校准。</div>
+
+<h2 id="ch4">4. 如何量化：实操流程（llama.cpp 路线）</h2>
+<p>四步流水线：<strong>转换 → 校准（可选） → 量化 → 验证</strong>。全部命令在 llama.cpp 构建目录执行。</p>
+
+<h3>4.1 转换：HF 权重 → GGUF</h3>
+<pre><code>python convert_hf_to_gguf.py /path/Qwen3-0.6B \
+    --outfile qwen3-06b-f16.gguf --outtype f16</code></pre>
+<p>GGUF = <strong>权重 + tokenizer + 架构元数据 + 模板单文件分发</strong>（前面聊 chat-template 时说的「单一事实源」就是这里的 <code>tokenizer.chat_template</code> 元数据键）。先转 F16 作为量化母本。</p>
+
+<h3>4.2 校准：生成重要性矩阵（imatrix）</h3>
+<pre><code>./llama-imatrix -m qwen3-06b-f16.gguf -f nlu_calib.txt -o imatrix.dat</code></pre>
+<p><code>nlu_calib.txt</code> 是普通文本文件，放<strong>领域语料</strong>——你们的真实/合成 NLU query、车控指令、多轮对话转写，几百 KB 即可。imatrix 统计每个张量上激活的分布，量化时据此保护重要权重。跳过这步用默认 RTN 也能量化，但 0.6B 级小模型建议总是带 imatrix。</p>
+
+<h3>4.3 量化</h3>
+<pre><code>./llama-quantize --imatrix imatrix.dat \
+    qwen3-06b-f16.gguf qwen3-06b-q4km.gguf Q4_K_M
+./llama-quantize qwen3-06b-f16.gguf qwen3-06b-q8.gguf Q8_0</code></pre>
+<p>一条命令一个格式。产出多个候选（Q8_0 / Q6_K / Q5_K_M / Q4_K_M）供第 5 章的评测对比。</p>
+
+<h3>4.4 运行时配套开关</h3>
+<pre><code>./llama-server -m qwen3-06b-q4km.gguf \
+    --jinja \                          # 用 GGUF 内嵌 Jinja 模板（单一事实源）
+    --cache-type-k q8_0 \              # KV cache 量化：上下文内存减半
+    --cache-type-v q8_0 \
+    -c 4096                            # 上下文长度（KV 预算的一部分）</code></pre>
+
+<h3>4.5 其他路线速览</h3>
+<ul>
+<li><b>GPU serving（TRT-LLM）</b>：走 FP8/NVFP4 checkpoint 量化（ModelOpt/AMMO 工具产出），与 llama.cpp 路线互不干扰；车机端侧用不到，云端节点可参考；</li>
+<li><b>训练侧（LLaMA-Factory）</b>：QLoRA（NF4 底座 + LoRA 微调 nlu_10）——注意这产出的 LoRA 适配器在合并导出后再走 4.1 的 GGUF 转换，两条链路衔接。</li>
+</ul>
+
+<h2 id="ch5">5. 如何评价模型效果：四维度 + 方法论</h2>
+<div class="fig"><svg viewBox="0 0 680 556" width="100%" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>量化模型效果评价体系：四个维度与评测方法论</title>
+<desc>量化保真、任务效果、推理性能、资源占用四个评价维度，以及 greedy 固定、回归集、切片分析、benchmark 局限等方法论红线。</desc>
+<style>.th{font-family:sans-serif;font-size:14px;font-weight:500;fill:#E6EDF3}.ts{font-family:sans-serif;font-size:12px;fill:#9AA7B4}.tb{font-family:sans-serif;font-size:12px;fill:#C9D4DE}</style>
+
+<text class="th" x="40" y="30">评价量化模型：四个维度（② 是门槛，①③④ 是约束）</text>
+
+<rect x="40" y="52" width="292" height="186" rx="8" fill="#0C447C" stroke="#85B7EB" stroke-width="0.5"/>
+<text class="th" x="56" y="76" fill="#B5D4F4">① 量化保真（离原版多近）</text>
+<text class="tb" x="56" y="100" fill="#B5D4F4">· PPL 前后对比（llama-perplexity）</text>
+<text class="tb" x="56" y="122" fill="#B5D4F4">  wikitext + 领域语料各测一份</text>
+<text class="tb" x="56" y="144" fill="#B5D4F4">· KL 散度 / logit 翻转率</text>
+<text class="tb" x="56" y="166" fill="#B5D4F4">  同输入下量化前后分布差异</text>
+<text class="tb" x="56" y="188" fill="#B5D4F4">· 同 seed greedy 生成一致性</text>
+<text class="tb" x="56" y="210" fill="#B5D4F4">  逐 token diff 比例</text>
+
+<rect x="348" y="52" width="292" height="186" rx="8" fill="#085041" stroke="#9FE1CB" stroke-width="0.5"/>
+<text class="th" x="364" y="76" fill="#9FE1CB">② 任务效果（最重要 · 业务口径）</text>
+<text class="tb" x="364" y="100" fill="#E1F5EE">· intent 准确率 / slot F1</text>
+<text class="tb" x="364" y="122" fill="#E1F5EE">  标注集 = 真实 + 合成 query</text>
+<text class="tb" x="364" y="144" fill="#E1F5EE">· 格式遵守率</text>
+<text class="tb" x="364" y="166" fill="#E1F5EE">  marker 命中 + schema 校验通过</text>
+<text class="tb" x="364" y="188" fill="#E1F5EE">· 端到端多轮对话成功率</text>
+<text class="tb" x="364" y="210" fill="#E1F5EE">  含纠错 / 追问 / barge-in 路径</text>
+
+<rect x="40" y="250" width="292" height="186" rx="8" fill="#633806" stroke="#FAC775" stroke-width="0.5"/>
+<text class="th" x="56" y="274" fill="#FAC775">③ 推理性能</text>
+<text class="tb" x="56" y="298" fill="#FAC775">· 生成吞吐 tg128（tokens/s）</text>
+<text class="tb" x="56" y="320" fill="#FAC775">· prefill 吞吐 pp512（t/s）</text>
+<text class="tb" x="56" y="342" fill="#FAC775">· 首 token 延迟（车机预算）</text>
+<text class="tb" x="56" y="364" fill="#FAC775">· llama-bench 一条命令全测</text>
+<text class="ts" x="56" y="392">注意：低位宽在 CPU 上常更慢</text>
+<text class="ts" x="56" y="412">（反量化开销 > 内存带宽收益）</text>
+
+<rect x="348" y="250" width="292" height="186" rx="8" fill="#3C3489" stroke="#AFA9EC" stroke-width="0.5"/>
+<text class="th" x="364" y="274" fill="#CECBF6">④ 资源占用</text>
+<text class="tb" x="364" y="298" fill="#CECBF6">· 文件大小（OTA 包体预算）</text>
+<text class="tb" x="364" y="320" fill="#CECBF6">· 运行内存峰值</text>
+<text class="tb" x="364" y="342" fill="#CECBF6">  权重 + KV cache + 开销</text>
+<text class="tb" x="364" y="364" fill="#CECBF6">· 功耗与温升</text>
+<text class="ts" x="364" y="392">车机 SoC 实测（夏天座舱环境）</text>
+<text class="ts" x="364" y="412">持续满载 vs 突发单次会话</text>
+
+<rect x="40" y="452" width="600" height="84" rx="8" fill="#161B22" stroke="#2D3641" stroke-width="0.5"/>
+<text class="th" x="56" y="474" fill="#FAC775">方法论红线（不守住则全部数字无效）</text>
+<text class="tb" x="56" y="496">① greedy + 固定 seed 才可对比（temperature&gt;0 的对比是抽签） ② 回归集 ≥500 条真实/合成 query，含长尾 intent 切片</text>
+<text class="tb" x="56" y="516">③ 量化前后同一模板/prompt/上下文（A/B 只变量化格式） ④ 通用 benchmark（MMLU 等）对 0.6B 接近噪声——只作参考，不作门槛</text>
+</svg>
+<div class="figcap">图 4 · 评价体系：② 任务效果是门槛，①③④ 是约束</div></div>
+
+<h3>5.1 量化保真（离原版多近）——工具现成</h3>
+<pre><code>./llama-perplexity -m qwen3-06b-q4km.gguf -f wikitext-2-raw.test.txt   # 通用 PPL
+./llama-perplexity -m qwen3-06b-q4km.gguf -f nlu_domain.txt            # 领域 PPL
+./llama-bench -m qwen3-06b-q8.gguf qwen3-06b-q4km.gguf -p 512 -n 128  # 性能对比</code></pre>
+<table>
+<tr><th>指标</th><th>含义</th><th>经验判读</th></tr>
+<tr><td>ΔPPL（困惑度增幅）</td><td>模型对文本的「意外程度」，越低越好</td><td>≤5% 安全；5~10% 观察；&gt;10% 通常可感知</td></tr>
+<tr><td>logit 翻转率</td><td>同输入下 top-1 改变的 token 比例（需 Python 侧对比）</td><td>直接对应格式漂移风险，nlu_10 场景建议测</td></tr>
+<tr><td>生成一致性</td><td>greedy + 固定 seed 下逐 token diff 比例</td><td>task 集上 diff &gt; 20% 说明量化已伤及输出分布</td></tr>
+</table>
+
+<h3>5.2 任务效果（最重要——业务口径）</h3>
+<p>通用 benchmark（MMLU / C-Eval / GSM8K）对 0.6B <strong>接近随机基线</strong>，分数噪声大，只作参考；真正的门槛是你们自己的 NLU 任务集：</p>
+<ul>
+<li><b>intent 准确率 / slot F1</b>：标注集 = 真实 query + 合成 query（覆盖长尾 intent 切片）；</li>
+<li><b>格式遵守率</b>：marker 命中率 + JSON schema 校验通过率——这是量化对你们最直接的风险面（logit 抖动 → marker 漂移）；</li>
+<li><b>端到端多轮对话成功率</b>：含纠错、追问、barge-in 路径。</li>
+</ul>
+
+<h3>5.3 门槛表（建议）</h3>
+<table>
+<tr><th>指标</th><th><span class="tag p0">P0</span>必须</th><th><span class="tag p1">P1</span>观察</th><th><span class="tag p2">P2</span>参考</th></tr>
+<tr><td>intent 准确率降幅（vs Q8_0）</td><td>≤ 1pp</td><td>≤ 2pp</td><td>—</td></tr>
+<tr><td>slot F1 降幅</td><td>≤ 2pp</td><td>≤ 3pp</td><td>—</td></tr>
+<tr><td>格式遵守率（marker + schema）</td><td>≥ 99.5%</td><td>≥ 99%</td><td>—</td></tr>
+<tr><td>ΔPPL</td><td>≤ 5%</td><td>≤ 8%</td><td>—</td></tr>
+<tr><td>长尾 intent 切片最大降幅</td><td>≤ 5pp</td><td>≤ 8pp</td><td>—</td></tr>
+<tr><td>tg128 tokens/s · 首 token 延迟</td><td>满足车机预算</td><td>—</td><td>—</td></tr>
+<tr><td>运行内存峰值</td><td>≤ 预算</td><td>—</td><td>—</td></tr>
+</table>
+
+<h3>5.4 方法论红线（不守住则全部数字无效）</h3>
+<ul>
+<li><b>greedy + 固定 seed</b> 才可对比——temperature&gt;0 的 A/B 是抽签；</li>
+<li><b>回归集 ≥500 条</b>，含长尾 intent 切片——总量指标会掩盖切片塌陷；</li>
+<li><b>同模板/prompt/上下文</b>——量化前后只变量化格式这一个因子（注意前几轮定的 <code>/no_think</code> 后缀和 <code>--jinja</code> 保持一致）；</li>
+<li><b>基准锚定 Q8_0 而非 BF16</b>——Q8_0 ≈ 无损且可用，直接对比 F16 会把「量化损失」和「部署损失」混在一起。</li>
+</ul>
+
+<h2 id="ch6">6. 落地建议：0.6B 车机 NLU 的量化选型</h2>
+<div class="fig"><svg viewBox="0 0 680 690" width="100%" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>0.6B 车机 NLU 量化选型决策流</title>
+<desc>从内存预算到 Q8_0 基线、Q4_K_M 候选、逐级回退到大模型换代的量化选型决策流程，含 KV cache 量化与校准集建议。</desc>
+<defs>
+  <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+</defs>
+<style>.th{font-family:sans-serif;font-size:14px;font-weight:500;fill:#E6EDF3}.ts{font-family:sans-serif;font-size:11.5px;fill:#9AA7B4}.tb{font-family:sans-serif;font-size:12px;fill:#C9D4DE}</style>
+
+<text class="th" x="40" y="30">0.6B 车机 NLU 量化选型决策流</text>
+
+<rect x="40" y="52" width="320" height="72" rx="8" fill="#0C447C" stroke="#85B7EB" stroke-width="0.5"/>
+<text class="th" x="200" y="76" text-anchor="middle" fill="#B5D4F4">① 定内存预算</text>
+<text class="tb" x="200" y="98" text-anchor="middle" fill="#B5D4F4">权重 + KV cache + 20% 开销</text>
+<text class="tb" x="200" y="114" text-anchor="middle" fill="#B5D4F4">≤ 车机可用内存（含 TTS 等共存进程）</text>
+
+<line x1="200" y1="124" x2="200" y2="144" stroke="#85B7EB" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+<rect x="40" y="148" width="320" height="72" rx="8" fill="#161B22" stroke="#2D3641" stroke-width="0.5"/>
+<text class="th" x="200" y="172" text-anchor="middle">② 建基线</text>
+<text class="tb" x="200" y="194" text-anchor="middle">BF16 与 Q8_0 各跑全套评测</text>
+<text class="tb" x="200" y="210" text-anchor="middle">（任务集 + PPL + llama-bench）</text>
+
+<line x1="200" y1="220" x2="200" y2="240" stroke="#85B7EB" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+<rect x="40" y="244" width="320" height="72" rx="8" fill="#161B22" stroke="#2D3641" stroke-width="0.5"/>
+<text class="th" x="200" y="268" text-anchor="middle">③ 压缩候选</text>
+<text class="tb" x="200" y="290" text-anchor="middle">Q4_K_M（+imatrix 领域校准）</text>
+<text class="tb" x="200" y="306" text-anchor="middle">校准集 = NLU 领域 query，不是 wiki</text>
+
+<line x1="200" y1="316" x2="200" y2="336" stroke="#85B7EB" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+<rect x="40" y="340" width="320" height="64" rx="8" fill="#3C3489" stroke="#AFA9EC" stroke-width="0.5"/>
+<text class="th" x="200" y="364" text-anchor="middle" fill="#CECBF6">任务降幅 ≤ 2pp 且 ΔPPL ≤ 5% ？</text>
+<text class="tb" x="200" y="388" text-anchor="middle" fill="#CECBF6">（含长尾 intent 切片无塌陷）</text>
+
+<line x1="360" y1="372" x2="396" y2="372" stroke="#9FE1CB" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text class="ts" x="368" y="362">是</text>
+<rect x="400" y="340" width="240" height="64" rx="8" fill="#085041" stroke="#9FE1CB" stroke-width="0.5"/>
+<text class="th" x="520" y="364" text-anchor="middle" fill="#9FE1CB">✓ 采用 Q4_K_M（0.37GB）</text>
+<text class="tb" x="520" y="388" text-anchor="middle" fill="#E1F5EE">进 OTA 灰度，线上监控格式遵守率</text>
+
+<text class="ts" x="208" y="418">否</text>
+<line x1="200" y1="404" x2="200" y2="424" stroke="#F09595" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+<rect x="40" y="428" width="320" height="64" rx="8" fill="#161B22" stroke="#2D3641" stroke-width="0.5"/>
+<text class="th" x="200" y="452" text-anchor="middle">④ 升精度回退</text>
+<text class="tb" x="200" y="476" text-anchor="middle">试 Q6_K（0.49GB）/ Q5_K_M（0.43GB）</text>
+
+<line x1="200" y1="492" x2="200" y2="512" stroke="#85B7EB" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+<rect x="40" y="516" width="320" height="64" rx="8" fill="#3C3489" stroke="#AFA9EC" stroke-width="0.5"/>
+<text class="th" x="200" y="540" text-anchor="middle" fill="#CECBF6">Q6/Q5 仍不达标？</text>
+<line x1="360" y1="548" x2="396" y2="548" stroke="#9FE1CB" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text class="ts" x="368" y="538">是</text>
+<rect x="400" y="516" width="240" height="64" rx="8" fill="#085041" stroke="#9FE1CB" stroke-width="0.5"/>
+<text class="th" x="520" y="540" text-anchor="middle" fill="#9FE1CB">✓ 采用 Q6_K / Q5_K_M</text>
+<text class="tb" x="520" y="564" text-anchor="middle" fill="#E1F5EE">保精度优先（车机通常装得下 0.5GB）</text>
+
+<text class="ts" x="208" y="594">否</text>
+<line x1="200" y1="580" x2="200" y2="600" stroke="#F09595" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+<rect x="40" y="604" width="600" height="76" rx="8" fill="#791F1F" stroke="#F09595" stroke-width="0.5"/>
+<text class="th" x="340" y="628" text-anchor="middle" fill="#F7C1C1">⑤ 别再降位宽 —— 换模型</text>
+<text class="tb" x="340" y="650" text-anchor="middle" fill="#F7C1C1">1.7B 的 Q4_K_M 通常优于 0.6B 的 Q3（大模型+低位宽 &gt; 小模型+低位宽，小模型量化敏感度高）</text>
+<text class="tb" x="340" y="670" text-anchor="middle" fill="#F7C1C1">或回到 SFT 提升底座能力（nlu_10 LoRA），再重新走本流程</text>
+
+<rect x="40" y="688" width="600" height="0" fill="none"/>
+</svg>
+<div class="figcap">图 5 · 量化选型决策流：预算 → 基线 → 候选 → 回退 → 换模型</div></div>
+<h3>6.1 0.6B 的量化特殊性</h3>
+<ul>
+<li><b>小模型对量化更敏感</b>：参数越少，每个权重承载的信息密度越高、层内冗余越少——同一位宽下 0.6B 的相对损失大于 7B+。社区经验：大模型 Q4_K_M 近无损，小模型要上移到 Q6/Q8；</li>
+<li><b>Embedding 占 26%</b>：量化工具默认对 embedding/output 保留较高精度（Q6_K），这一块不用操心但要知道；</li>
+<li><b>「大模型 + 低位宽 &gt; 小模型 + 低位宽」</b>：1.7B 的 Q4_K_M 通常优于 0.6B 的 Q3_K_M——内存预算允许时，<strong>别用降位宽省内存，用换大一号模型花内存</strong>；</li>
+<li><b>KV cache 是被忽视的杠杆</b>：4K 上下文时 KV（448MB）&gt; Q4 权重（0.37GB），<code>--cache-type-k/v q8_0</code> 先于降权重量化考虑。</li>
+</ul>
+<h3>6.2 建议路径</h3>
+<ol>
+<li>按第 4 章流程产出 Q8_0 / Q6_K / Q5_K_M / Q4_K_M（全部带 imatrix 领域校准）四个候选；</li>
+<li>跑第 5 章评测门槛表，Q4_K_M 过门槛就用它（0.37GB，OTA 包体友好）；过不了上 Q5/Q6（0.43/0.49GB，车机通常装得下）；</li>
+<li>进入 nlu_10 LoRA SFT 之后<strong>重跑一遍评测</strong>——SFT 会改变输出分布（更集中在格式化输出上），量化敏感面随之变化；</li>
+<li>线上灰度监控「格式遵守率」作为量化健康指标，与前面 retry-rate 探针同一套观测面板。</li>
+</ol>
+<div class="ok"><b>一句话总结</b>：权重是只读参数张量，量化是「分组线性映射 + 误差补偿」，0.6B 场景的方法选 k-quants+imatrix，评测锚定 Q8_0 基线上的<strong>任务指标切片</strong>而非通用 benchmark——内存不够先砍 KV 和上下文，再考虑降位宽，最后才考虑换模型大小。</div>
+</div>
+</body>
+</html>

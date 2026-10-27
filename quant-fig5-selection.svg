@@ -1,0 +1,70 @@
+<svg viewBox="0 0 680 690" width="100%" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>0.6B 车机 NLU 量化选型决策流</title>
+<desc>从内存预算到 Q8_0 基线、Q4_K_M 候选、逐级回退到大模型换代的量化选型决策流程，含 KV cache 量化与校准集建议。</desc>
+<defs>
+  <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+</defs>
+<style>.th{font-family:sans-serif;font-size:14px;font-weight:500;fill:#E6EDF3}.ts{font-family:sans-serif;font-size:11.5px;fill:#9AA7B4}.tb{font-family:sans-serif;font-size:12px;fill:#C9D4DE}</style>
+
+<text class="th" x="40" y="30">0.6B 车机 NLU 量化选型决策流</text>
+
+<rect x="40" y="52" width="320" height="72" rx="8" fill="#0C447C" stroke="#85B7EB" stroke-width="0.5"/>
+<text class="th" x="200" y="76" text-anchor="middle" fill="#B5D4F4">① 定内存预算</text>
+<text class="tb" x="200" y="98" text-anchor="middle" fill="#B5D4F4">权重 + KV cache + 20% 开销</text>
+<text class="tb" x="200" y="114" text-anchor="middle" fill="#B5D4F4">≤ 车机可用内存（含 TTS 等共存进程）</text>
+
+<line x1="200" y1="124" x2="200" y2="144" stroke="#85B7EB" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+<rect x="40" y="148" width="320" height="72" rx="8" fill="#161B22" stroke="#2D3641" stroke-width="0.5"/>
+<text class="th" x="200" y="172" text-anchor="middle">② 建基线</text>
+<text class="tb" x="200" y="194" text-anchor="middle">BF16 与 Q8_0 各跑全套评测</text>
+<text class="tb" x="200" y="210" text-anchor="middle">（任务集 + PPL + llama-bench）</text>
+
+<line x1="200" y1="220" x2="200" y2="240" stroke="#85B7EB" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+<rect x="40" y="244" width="320" height="72" rx="8" fill="#161B22" stroke="#2D3641" stroke-width="0.5"/>
+<text class="th" x="200" y="268" text-anchor="middle">③ 压缩候选</text>
+<text class="tb" x="200" y="290" text-anchor="middle">Q4_K_M（+imatrix 领域校准）</text>
+<text class="tb" x="200" y="306" text-anchor="middle">校准集 = NLU 领域 query，不是 wiki</text>
+
+<line x1="200" y1="316" x2="200" y2="336" stroke="#85B7EB" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+<rect x="40" y="340" width="320" height="64" rx="8" fill="#3C3489" stroke="#AFA9EC" stroke-width="0.5"/>
+<text class="th" x="200" y="364" text-anchor="middle" fill="#CECBF6">任务降幅 ≤ 2pp 且 ΔPPL ≤ 5% ？</text>
+<text class="tb" x="200" y="388" text-anchor="middle" fill="#CECBF6">（含长尾 intent 切片无塌陷）</text>
+
+<line x1="360" y1="372" x2="396" y2="372" stroke="#9FE1CB" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text class="ts" x="368" y="362">是</text>
+<rect x="400" y="340" width="240" height="64" rx="8" fill="#085041" stroke="#9FE1CB" stroke-width="0.5"/>
+<text class="th" x="520" y="364" text-anchor="middle" fill="#9FE1CB">✓ 采用 Q4_K_M（0.37GB）</text>
+<text class="tb" x="520" y="388" text-anchor="middle" fill="#E1F5EE">进 OTA 灰度，线上监控格式遵守率</text>
+
+<text class="ts" x="208" y="418">否</text>
+<line x1="200" y1="404" x2="200" y2="424" stroke="#F09595" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+<rect x="40" y="428" width="320" height="64" rx="8" fill="#161B22" stroke="#2D3641" stroke-width="0.5"/>
+<text class="th" x="200" y="452" text-anchor="middle">④ 升精度回退</text>
+<text class="tb" x="200" y="476" text-anchor="middle">试 Q6_K（0.49GB）/ Q5_K_M（0.43GB）</text>
+
+<line x1="200" y1="492" x2="200" y2="512" stroke="#85B7EB" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+<rect x="40" y="516" width="320" height="64" rx="8" fill="#3C3489" stroke="#AFA9EC" stroke-width="0.5"/>
+<text class="th" x="200" y="540" text-anchor="middle" fill="#CECBF6">Q6/Q5 仍不达标？</text>
+<line x1="360" y1="548" x2="396" y2="548" stroke="#9FE1CB" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text class="ts" x="368" y="538">是</text>
+<rect x="400" y="516" width="240" height="64" rx="8" fill="#085041" stroke="#9FE1CB" stroke-width="0.5"/>
+<text class="th" x="520" y="540" text-anchor="middle" fill="#9FE1CB">✓ 采用 Q6_K / Q5_K_M</text>
+<text class="tb" x="520" y="564" text-anchor="middle" fill="#E1F5EE">保精度优先（车机通常装得下 0.5GB）</text>
+
+<text class="ts" x="208" y="594">否</text>
+<line x1="200" y1="580" x2="200" y2="600" stroke="#F09595" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+<rect x="40" y="604" width="600" height="76" rx="8" fill="#791F1F" stroke="#F09595" stroke-width="0.5"/>
+<text class="th" x="340" y="628" text-anchor="middle" fill="#F7C1C1">⑤ 别再降位宽 —— 换模型</text>
+<text class="tb" x="340" y="650" text-anchor="middle" fill="#F7C1C1">1.7B 的 Q4_K_M 通常优于 0.6B 的 Q3（大模型+低位宽 &gt; 小模型+低位宽，小模型量化敏感度高）</text>
+<text class="tb" x="340" y="670" text-anchor="middle" fill="#F7C1C1">或回到 SFT 提升底座能力（nlu_10 LoRA），再重新走本流程</text>
+
+<rect x="40" y="688" width="600" height="0" fill="none"/>
+</svg>

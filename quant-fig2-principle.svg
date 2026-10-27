@@ -1,0 +1,68 @@
+<svg viewBox="0 0 680 640" width="100%" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>量化原理：线性映射、粒度与误差来源</title>
+<desc>仿射量化公式、对称与非对称量化、per-tensor/per-channel/per-group 粒度、round-off 与 outlier 误差、权重-only/W+A/KV 三档量化对象。</desc>
+<defs>
+  <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+</defs>
+<style>.th{font-family:sans-serif;font-size:14px;font-weight:500;fill:#E6EDF3}.ts{font-family:sans-serif;font-size:12px;fill:#9AA7B4}.tb{font-family:sans-serif;font-size:12.5px;fill:#C9D4DE}.tm{font-family:monospace;font-size:12px;fill:#8FBCE8}</style>
+
+<text class="th" x="40" y="30">量化原理：线性映射 · 粒度 · 误差</text>
+
+<rect x="40" y="50" width="600" height="88" rx="8" fill="#0C447C" stroke="#85B7EB" stroke-width="0.5"/>
+<text class="th" x="56" y="72" fill="#B5D4F4">仿射量化（所有整数量化的数学核心）</text>
+<text class="tm" x="56" y="96">量化   q = round(x / s) + z        INT4 时 q ∈ [−8, +7]（仅 16 个格点）</text>
+<text class="tm" x="56" y="116">反量化 x̂ = (q − z) × s             s = (x_max − x_min) / (q_max − q_min)</text>
+<text class="tb" x="56" y="132" fill="#B5D4F4">单权重误差 |x − x̂| ≤ s/2：步长 s 越小精度越高，但可表示的数值范围越窄</text>
+
+<rect x="40" y="152" width="292" height="104" rx="8" fill="#161B22" stroke="#2D3641" stroke-width="0.5"/>
+<text class="th" x="56" y="176">对称量化（z = 0）</text>
+<text class="ts" x="56" y="196">s = max|x| / 127 · 适合近似对称分布（权重）</text>
+<line x1="64" y1="222" x2="300" y2="222" stroke="#85B7EB" stroke-width="1" marker-end="url(#arrow)"/>
+<line x1="182" y1="216" x2="182" y2="228" stroke="#FAC775" stroke-width="1.5"/>
+<text class="ts" x="72" y="240">−127</text><text class="ts" x="176" y="240">0</text><text class="ts" x="280" y="240">+127</text>
+
+<rect x="348" y="152" width="292" height="104" rx="8" fill="#161B22" stroke="#2D3641" stroke-width="0.5"/>
+<text class="th" x="364" y="176">非对称量化（z ≠ 0）</text>
+<text class="ts" x="364" y="196">适配偏移分布（ReLU 后激活全为正）</text>
+<line x1="372" y1="222" x2="608" y2="222" stroke="#85B7EB" stroke-width="1" marker-end="url(#arrow)"/>
+<line x1="470" y1="216" x2="470" y2="228" stroke="#FAC775" stroke-width="1.5"/>
+<text class="ts" x="380" y="240">x_min</text><text class="ts" x="456" y="240">z(零点)</text><text class="ts" x="580" y="240">x_max</text>
+
+<rect x="40" y="270" width="600" height="146" rx="8" fill="#161B22" stroke="#2D3641" stroke-width="0.5"/>
+<text class="th" x="56" y="294">粒度：scale 共享多少权重（越小越准、元数据越多）</text>
+<rect x="56" y="308" width="180" height="92" rx="8" fill="#3C3489" stroke="#AFA9EC" stroke-width="0.5"/>
+<text class="th" x="146" y="330" text-anchor="middle" fill="#CECBF6">per-tensor</text>
+<text class="ts" x="146" y="350" text-anchor="middle">整矩阵 1 组 (s, z)</text>
+<text class="ts" x="146" y="368" text-anchor="middle">元数据最省</text>
+<text class="ts" x="146" y="386" text-anchor="middle">误差最大</text>
+<rect x="250" y="308" width="180" height="92" rx="8" fill="#0C447C" stroke="#85B7EB" stroke-width="0.5"/>
+<text class="th" x="340" y="330" text-anchor="middle" fill="#B5D4F4">per-channel</text>
+<text class="ts" x="340" y="350" text-anchor="middle">每个输出通道 1 组</text>
+<text class="ts" x="340" y="368" text-anchor="middle">数百~数千组</text>
+<text class="ts" x="340" y="386" text-anchor="middle">W8 主流做法</text>
+<rect x="444" y="308" width="180" height="92" rx="8" fill="#633806" stroke="#FAC775" stroke-width="0.5"/>
+<text class="th" x="534" y="330" text-anchor="middle" fill="#FAC775">per-group</text>
+<text class="ts" x="534" y="350" text-anchor="middle">每 32/256 权重 1 组</text>
+<text class="ts" x="534" y="368" text-anchor="middle">GGUF k-quant super-block</text>
+<text class="ts" x="534" y="386" text-anchor="middle">scale 本身用 6bit 再压缩</text>
+
+<rect x="40" y="432" width="292" height="118" rx="8" fill="#161B22" stroke="#2D3641" stroke-width="0.5"/>
+<text class="th" x="56" y="456">误差来源 ① round-off</text>
+<text class="ts" x="56" y="478">每个权重 ±s/2 的舍入噪声，</text>
+<text class="ts" x="56" y="496">单看微小，经 28 层矩阵乘累积</text>
+<text class="ts" x="56" y="514">后放大 → 表现为 logits 抖动、</text>
+<text class="ts" x="56" y="532">近并列 token 翻转</text>
+
+<rect x="348" y="432" width="292" height="118" rx="8" fill="#161B22" stroke="#2D3641" stroke-width="0.5"/>
+<text class="th" x="364" y="456">误差来源 ② outlier（主要矛盾）</text>
+<text class="ts" x="364" y="478">LLM 激活存在系统性离群通道；</text>
+<text class="ts" x="364" y="496">若按 max 定 s，99% 的普通值</text>
+<text class="ts" x="364" y="514">被挤进极窄格点 → 误差暴涨。</text>
+<text class="ts" x="364" y="532">AWQ / SmoothQuant 均为此而生</text>
+
+<rect x="40" y="566" width="600" height="56" rx="8" fill="#085041" stroke="#9FE1CB" stroke-width="0.5"/>
+<text class="th" x="56" y="588" fill="#9FE1CB">量化对象三档</text>
+<text class="tb" x="56" y="608" fill="#E1F5EE">权重-only（W4A16，llama.cpp 路线，权重静态可离线） · 权重+激活（W8A8，GPU 整数 kernel 端到端加速） · KV cache（q8_0，上下文内存减半）</text>
+</svg>

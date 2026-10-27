@@ -1,0 +1,48 @@
+<svg viewBox="0 0 680 556" width="100%" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>量化模型效果评价体系：四个维度与评测方法论</title>
+<desc>量化保真、任务效果、推理性能、资源占用四个评价维度，以及 greedy 固定、回归集、切片分析、benchmark 局限等方法论红线。</desc>
+<style>.th{font-family:sans-serif;font-size:14px;font-weight:500;fill:#E6EDF3}.ts{font-family:sans-serif;font-size:12px;fill:#9AA7B4}.tb{font-family:sans-serif;font-size:12px;fill:#C9D4DE}</style>
+
+<text class="th" x="40" y="30">评价量化模型：四个维度（② 是门槛，①③④ 是约束）</text>
+
+<rect x="40" y="52" width="292" height="186" rx="8" fill="#0C447C" stroke="#85B7EB" stroke-width="0.5"/>
+<text class="th" x="56" y="76" fill="#B5D4F4">① 量化保真（离原版多近）</text>
+<text class="tb" x="56" y="100" fill="#B5D4F4">· PPL 前后对比（llama-perplexity）</text>
+<text class="tb" x="56" y="122" fill="#B5D4F4">  wikitext + 领域语料各测一份</text>
+<text class="tb" x="56" y="144" fill="#B5D4F4">· KL 散度 / logit 翻转率</text>
+<text class="tb" x="56" y="166" fill="#B5D4F4">  同输入下量化前后分布差异</text>
+<text class="tb" x="56" y="188" fill="#B5D4F4">· 同 seed greedy 生成一致性</text>
+<text class="tb" x="56" y="210" fill="#B5D4F4">  逐 token diff 比例</text>
+
+<rect x="348" y="52" width="292" height="186" rx="8" fill="#085041" stroke="#9FE1CB" stroke-width="0.5"/>
+<text class="th" x="364" y="76" fill="#9FE1CB">② 任务效果（最重要 · 业务口径）</text>
+<text class="tb" x="364" y="100" fill="#E1F5EE">· intent 准确率 / slot F1</text>
+<text class="tb" x="364" y="122" fill="#E1F5EE">  标注集 = 真实 + 合成 query</text>
+<text class="tb" x="364" y="144" fill="#E1F5EE">· 格式遵守率</text>
+<text class="tb" x="364" y="166" fill="#E1F5EE">  marker 命中 + schema 校验通过</text>
+<text class="tb" x="364" y="188" fill="#E1F5EE">· 端到端多轮对话成功率</text>
+<text class="tb" x="364" y="210" fill="#E1F5EE">  含纠错 / 追问 / barge-in 路径</text>
+
+<rect x="40" y="250" width="292" height="186" rx="8" fill="#633806" stroke="#FAC775" stroke-width="0.5"/>
+<text class="th" x="56" y="274" fill="#FAC775">③ 推理性能</text>
+<text class="tb" x="56" y="298" fill="#FAC775">· 生成吞吐 tg128（tokens/s）</text>
+<text class="tb" x="56" y="320" fill="#FAC775">· prefill 吞吐 pp512（t/s）</text>
+<text class="tb" x="56" y="342" fill="#FAC775">· 首 token 延迟（车机预算）</text>
+<text class="tb" x="56" y="364" fill="#FAC775">· llama-bench 一条命令全测</text>
+<text class="ts" x="56" y="392">注意：低位宽在 CPU 上常更慢</text>
+<text class="ts" x="56" y="412">（反量化开销 > 内存带宽收益）</text>
+
+<rect x="348" y="250" width="292" height="186" rx="8" fill="#3C3489" stroke="#AFA9EC" stroke-width="0.5"/>
+<text class="th" x="364" y="274" fill="#CECBF6">④ 资源占用</text>
+<text class="tb" x="364" y="298" fill="#CECBF6">· 文件大小（OTA 包体预算）</text>
+<text class="tb" x="364" y="320" fill="#CECBF6">· 运行内存峰值</text>
+<text class="tb" x="364" y="342" fill="#CECBF6">  权重 + KV cache + 开销</text>
+<text class="tb" x="364" y="364" fill="#CECBF6">· 功耗与温升</text>
+<text class="ts" x="364" y="392">车机 SoC 实测（夏天座舱环境）</text>
+<text class="ts" x="364" y="412">持续满载 vs 突发单次会话</text>
+
+<rect x="40" y="452" width="600" height="84" rx="8" fill="#161B22" stroke="#2D3641" stroke-width="0.5"/>
+<text class="th" x="56" y="474" fill="#FAC775">方法论红线（不守住则全部数字无效）</text>
+<text class="tb" x="56" y="496">① greedy + 固定 seed 才可对比（temperature&gt;0 的对比是抽签） ② 回归集 ≥500 条真实/合成 query，含长尾 intent 切片</text>
+<text class="tb" x="56" y="516">③ 量化前后同一模板/prompt/上下文（A/B 只变量化格式） ④ 通用 benchmark（MMLU 等）对 0.6B 接近噪声——只作参考，不作门槛</text>
+</svg>
