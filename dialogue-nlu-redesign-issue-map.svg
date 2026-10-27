@@ -1,0 +1,91 @@
+<svg viewBox="0 0 680 800" width="100%" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" role="img">
+<title>V3 配置方案问题地图</title>
+<desc>八个问题按 P0 P1 P2 分级：三个必须改、三个强烈建议、两个建议关注，底部绿色为原设计正确应保留项</desc>
+<text x="40" y="44" font-size="15" font-weight="500" fill="#D3D1C7">V3 配置方案问题地图 · 严重度分级</text>
+<text x="40" y="64" font-size="11" font-weight="400" fill="#B4B2A9">P0 = 必须改 · P1 = 强烈建议 · P2 = 建议关注 · 底部绿色 = 原设计正确、应保留</text>
+<rect x="40" y="92" width="292" height="140" rx="8" fill="#2C2C2A" stroke="#5F5E5A" stroke-width="0.5"/>
+<rect x="52" y="104" width="46" height="22" rx="4" fill="#791F1F" stroke="#F09595" stroke-width="0.5"/>
+<text x="75" y="116" font-size="11" font-weight="500" fill="#F7C1C1" text-anchor="middle" dominant-baseline="central">P0-1</text>
+<text x="106" y="119" font-size="12" font-weight="500" fill="#D3D1C7">生成侧约束缺失</text>
+<text x="52" y="142" font-size="11" font-weight="400" fill="#B4B2A9"><tspan fill="#F09595">问题：</tspan>BuildRequest 无 response_format，</text>
+<text x="52" y="158" font-size="11" font-weight="400" fill="#B4B2A9">格式鲁棒性全押事后解析</text>
+<text x="52" y="174" font-size="11" font-weight="400" fill="#B4B2A9"><tspan fill="#EF9F27">机制：</tspan>采样是软约束；0.6B + 量化后</text>
+<text x="52" y="190" font-size="11" font-weight="400" fill="#B4B2A9">指令跟随更弱，marker 漂移不可控</text>
+<text x="52" y="206" font-size="11" font-weight="400" fill="#B4B2A9"><tspan fill="#97C459">修正：</tspan>json_schema → GBNF 语法约束，</text>
+<text x="52" y="222" font-size="11" font-weight="400" fill="#B4B2A9">HTTP 与 offline 双路径均支持</text>
+<rect x="348" y="92" width="292" height="140" rx="8" fill="#2C2C2A" stroke="#5F5E5A" stroke-width="0.5"/>
+<rect x="360" y="104" width="46" height="22" rx="4" fill="#791F1F" stroke="#F09595" stroke-width="0.5"/>
+<text x="383" y="116" font-size="11" font-weight="500" fill="#F7C1C1" text-anchor="middle" dominant-baseline="central">P0-2</text>
+<text x="414" y="119" font-size="12" font-weight="500" fill="#D3D1C7">thinking 行为未定义</text>
+<text x="360" y="142" font-size="11" font-weight="400" fill="#B4B2A9"><tspan fill="#F09595">问题：</tspan>无思考控制；Qwen3-0.6B 默认先</text>
+<text x="360" y="158" font-size="11" font-weight="400" fill="#B4B2A9">输出 think 段再进正文</text>
+<text x="360" y="174" font-size="11" font-weight="400" fill="#B4B2A9"><tspan fill="#EF9F27">机制：</tspan>思考先耗 max_tokens，marker</text>
+<text x="360" y="190" font-size="11" font-weight="400" fill="#B4B2A9">偏移 / 截断，延迟不可控</text>
+<text x="360" y="206" font-size="11" font-weight="400" fill="#B4B2A9"><tspan fill="#97C459">修正：</tspan>/no_think（L2）→ SFT 烧死（L4），</text>
+<text x="360" y="222" font-size="11" font-weight="400" fill="#B4B2A9">S0 剥离常驻兜底（含未闭合）</text>
+<rect x="40" y="244" width="292" height="140" rx="8" fill="#2C2C2A" stroke="#5F5E5A" stroke-width="0.5"/>
+<rect x="52" y="256" width="46" height="22" rx="4" fill="#791F1F" stroke="#F09595" stroke-width="0.5"/>
+<text x="75" y="268" font-size="11" font-weight="500" fill="#F7C1C1" text-anchor="middle" dominant-baseline="central">P0-3</text>
+<text x="106" y="271" font-size="12" font-weight="500" fill="#D3D1C7">双路径渲染一致性未规定</text>
+<text x="52" y="294" font-size="11" font-weight="400" fill="#B4B2A9"><tspan fill="#F09595">问题：</tspan>Linux / Android 未强制同一模板</text>
+<text x="52" y="310" font-size="11" font-weight="400" fill="#B4B2A9">引擎与同一事实源</text>
+<text x="52" y="326" font-size="11" font-weight="400" fill="#B4B2A9"><tspan fill="#EF9F27">机制：</tspan>legacy 启发式与 --jinja 渲染</text>
+<text x="52" y="342" font-size="11" font-weight="400" fill="#B4B2A9">字节级不同 → 跨平台 marker 漂移</text>
+<text x="52" y="358" font-size="11" font-weight="400" fill="#B4B2A9"><tspan fill="#97C459">修正：</tspan>两侧 use_jinja=true；模板唯一</text>
+<text x="52" y="374" font-size="11" font-weight="400" fill="#B4B2A9">事实源 = GGUF，配置不留副本</text>
+<rect x="348" y="244" width="292" height="140" rx="8" fill="#2C2C2A" stroke="#5F5E5A" stroke-width="0.5"/>
+<rect x="360" y="256" width="46" height="22" rx="4" fill="#633806" stroke="#EF9F27" stroke-width="0.5"/>
+<text x="383" y="268" font-size="11" font-weight="500" fill="#FAC775" text-anchor="middle" dominant-baseline="central">P1-1</text>
+<text x="414" y="271" font-size="12" font-weight="500" fill="#D3D1C7">失败出口未定义</text>
+<text x="360" y="294" font-size="11" font-weight="400" fill="#B4B2A9"><tspan fill="#F09595">问题：</tspan>全候选不通过时系统去向未定义</text>
+<text x="360" y="310" font-size="11" font-weight="400" fill="#B4B2A9">（隐含直接 unknown 兜底）</text>
+<text x="360" y="326" font-size="11" font-weight="400" fill="#B4B2A9"><tspan fill="#EF9F27">机制：</tspan>grammar 消灭语法失败后，语义</text>
+<text x="360" y="342" font-size="11" font-weight="400" fill="#B4B2A9">失败仍需出口与噪声判别</text>
+<text x="360" y="358" font-size="11" font-weight="400" fill="#B4B2A9"><tspan fill="#97C459">修正：</tspan>有界 retry×1 + 失败反馈 + 预算</text>
+<text x="360" y="374" font-size="11" font-weight="400" fill="#B4B2A9">守卫 → 仍败 → unknown → DM</text>
+<rect x="40" y="396" width="292" height="140" rx="8" fill="#2C2C2A" stroke="#5F5E5A" stroke-width="0.5"/>
+<rect x="52" y="408" width="46" height="22" rx="4" fill="#633806" stroke="#EF9F27" stroke-width="0.5"/>
+<text x="75" y="420" font-size="11" font-weight="500" fill="#FAC775" text-anchor="middle" dominant-baseline="central">P1-2</text>
+<text x="106" y="423" font-size="12" font-weight="500" fill="#D3D1C7">采样参数耦合进协议</text>
+<text x="52" y="446" font-size="11" font-weight="400" fill="#B4B2A9"><tspan fill="#F09595">问题：</tspan>temp / top_k / max_tokens 写死在</text>
+<text x="52" y="462" font-size="11" font-weight="400" fill="#B4B2A9">共享 BuildRequest JSON 里</text>
+<text x="52" y="478" font-size="11" font-weight="400" fill="#B4B2A9"><tspan fill="#EF9F27">机制：</tspan>模型相关值混入跨模型协议；聊天</text>
+<text x="52" y="494" font-size="11" font-weight="400" fill="#B4B2A9">默认温度不适合决策型输出</text>
+<text x="52" y="510" font-size="11" font-weight="400" fill="#B4B2A9"><tspan fill="#97C459">修正：</tspan>参数移入 Profile（换模型=改配置）；</text>
+<text x="52" y="526" font-size="11" font-weight="400" fill="#B4B2A9">NLU 建议 temperature ≤ 0.2</text>
+<rect x="348" y="396" width="292" height="140" rx="8" fill="#2C2C2A" stroke="#5F5E5A" stroke-width="0.5"/>
+<rect x="360" y="408" width="46" height="22" rx="4" fill="#633806" stroke="#EF9F27" stroke-width="0.5"/>
+<text x="383" y="420" font-size="11" font-weight="500" fill="#FAC775" text-anchor="middle" dominant-baseline="central">P1-3</text>
+<text x="414" y="423" font-size="12" font-weight="500" fill="#D3D1C7">墙钟预算与打断缺失</text>
+<text x="360" y="446" font-size="11" font-weight="400" fill="#B4B2A9"><tspan fill="#F09595">问题：</tspan>stream:false 只有 token 上界；</text>
+<text x="360" y="462" font-size="11" font-weight="400" fill="#B4B2A9">barge-in 取消行为未定义</text>
+<text x="360" y="478" font-size="11" font-weight="400" fill="#B4B2A9"><tspan fill="#EF9F27">机制：</tspan>车机延迟硬预算 1.5–2s；超时 /</text>
+<text x="360" y="494" font-size="11" font-weight="400" fill="#B4B2A9">取消后重试 = 双重惩罚</text>
+<text x="360" y="510" font-size="11" font-weight="400" fill="#B4B2A9"><tspan fill="#97C459">修正：</tspan>T_total 墙钟 + 取消传播；</text>
+<text x="360" y="526" font-size="11" font-weight="400" fill="#B4B2A9">取消 / 超时一律不重试</text>
+<rect x="40" y="548" width="292" height="140" rx="8" fill="#2C2C2A" stroke="#5F5E5A" stroke-width="0.5"/>
+<rect x="52" y="560" width="46" height="22" rx="4" fill="#0C447C" stroke="#85B7EB" stroke-width="0.5"/>
+<text x="75" y="572" font-size="11" font-weight="500" fill="#B5D4F4" text-anchor="middle" dominant-baseline="central">P2-1</text>
+<text x="106" y="575" font-size="12" font-weight="500" fill="#D3D1C7">可观测性缺口</text>
+<text x="52" y="598" font-size="11" font-weight="400" fill="#B4B2A9"><tspan fill="#F09595">问题：</tspan>无失败分类计数、S0 命中率、</text>
+<text x="52" y="614" font-size="11" font-weight="400" fill="#B4B2A9">retry-rate 等运行指标</text>
+<text x="52" y="630" font-size="11" font-weight="400" fill="#B4B2A9"><tspan fill="#EF9F27">机制：</tspan>车规 OTA 排障需要代码与配置</text>
+<text x="52" y="646" font-size="11" font-weight="400" fill="#B4B2A9">之外的问题定位线索</text>
+<text x="52" y="662" font-size="11" font-weight="400" fill="#B4B2A9"><tspan fill="#97C459">修正：</tspan>四类失败计数 + S0 命中率 +</text>
+<text x="52" y="678" font-size="11" font-weight="400" fill="#B4B2A9">retry-rate 健康探针上报</text>
+<rect x="348" y="548" width="292" height="140" rx="8" fill="#2C2C2A" stroke="#5F5E5A" stroke-width="0.5"/>
+<rect x="360" y="560" width="46" height="22" rx="4" fill="#0C447C" stroke="#85B7EB" stroke-width="0.5"/>
+<text x="383" y="572" font-size="11" font-weight="500" fill="#B5D4F4" text-anchor="middle" dominant-baseline="central">P2-2</text>
+<text x="414" y="575" font-size="12" font-weight="500" fill="#D3D1C7">多候选成本未评估</text>
+<text x="360" y="598" font-size="11" font-weight="400" fill="#B4B2A9"><tspan fill="#F09595">问题：</tspan>全候选门下 n&gt;1 线性放大延迟</text>
+<text x="360" y="614" font-size="11" font-weight="400" fill="#B4B2A9">（车机延迟预算敏感）</text>
+<text x="360" y="630" font-size="11" font-weight="400" fill="#B4B2A9"><tspan fill="#EF9F27">机制：</tspan>grammar 落地后语义分歧概率</text>
+<text x="360" y="646" font-size="11" font-weight="400" fill="#B4B2A9">大降，多候选收益骤减</text>
+<text x="360" y="662" font-size="11" font-weight="400" fill="#B4B2A9"><tspan fill="#97C459">修正：</tspan>grammar 后 n=1 起步；候选裁决</text>
+<text x="360" y="678" font-size="11" font-weight="400" fill="#B4B2A9">保留为校验而非采样策略</text>
+<rect x="40" y="698" width="600" height="80" rx="8" fill="#27500A" stroke="#97C459" stroke-width="0.5"/>
+<text x="52" y="720" font-size="12" font-weight="500" fill="#C0DD97">原设计正确、应保留的部分</text>
+<text x="52" y="740" font-size="11" font-weight="400" fill="#C0DD97">stream:false + bounded buffer + 不发布部分语义 · 全候选严格门（grammar 后转为形式校验）</text>
+<text x="52" y="756" font-size="11" font-weight="400" fill="#C0DD97">codec / factory 显式枚举（Rule of Three + 车规审计轨迹）· offline / online 复用同一 JSON</text>
+<text x="52" y="772" font-size="11" font-weight="400" fill="#C0DD97">NluConfig → Model → Profile 配置分层方向正确（本方案在其上细化字段归属）</text>
+</svg>

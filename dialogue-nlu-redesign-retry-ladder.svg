@@ -1,0 +1,49 @@
+<svg viewBox="0 0 680 500" width="100%" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" role="img">
+<title>失败出口状态机 · 有界重试阶梯</title>
+<desc>尝试一次后按结果分类：成功则发布写历史；格式或校验失败先过预算守卫再重试一次；超时取消或 5xx 直接兜底</desc>
+<defs>
+<marker id="arrow2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+<path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+</marker>
+</defs>
+<text x="40" y="44" font-size="15" font-weight="500" fill="#D3D1C7">失败出口状态机 · 有界重试阶梯</text>
+<text x="40" y="64" font-size="11" font-weight="400" fill="#B4B2A9">每个失败都有定义好的出口 · 延迟上界 = 2× 单次 · 区分采样噪声与系统性失败</text>
+<rect x="40" y="110" width="120" height="56" rx="8" fill="#2C2C2A" stroke="#5F5E5A" stroke-width="0.5"/>
+<text x="100" y="131" font-size="13" font-weight="500" fill="#D3D1C7" text-anchor="middle" dominant-baseline="central">尝试 #1</text>
+<text x="100" y="149" font-size="11" font-weight="400" fill="#B4B2A9" text-anchor="middle" dominant-baseline="central">首次生成</text>
+<rect x="40" y="210" width="120" height="56" rx="8" fill="#2C2C2A" stroke="#5F5E5A" stroke-width="0.5"/>
+<text x="100" y="231" font-size="13" font-weight="500" fill="#D3D1C7" text-anchor="middle" dominant-baseline="central">结果分类</text>
+<text x="100" y="249" font-size="11" font-weight="400" fill="#B4B2A9" text-anchor="middle" dominant-baseline="central">格式 / 环境 / 成功</text>
+<rect x="250" y="60" width="190" height="56" rx="8" fill="#27500A" stroke="#97C459" stroke-width="0.5"/>
+<text x="345" y="81" font-size="13" font-weight="500" fill="#C0DD97" text-anchor="middle" dominant-baseline="central">发布 + 写会话历史</text>
+<text x="345" y="99" font-size="11" font-weight="400" fill="#C0DD97" text-anchor="middle" dominant-baseline="central">仅成功一次 · 无脏记录</text>
+<rect x="250" y="190" width="190" height="56" rx="8" fill="#633806" stroke="#EF9F27" stroke-width="0.5"/>
+<text x="345" y="211" font-size="13" font-weight="500" fill="#FAC775" text-anchor="middle" dominant-baseline="central">预算守卫 elapsed &lt; T/2</text>
+<text x="345" y="229" font-size="11" font-weight="400" fill="#FAC775" text-anchor="middle" dominant-baseline="central">防双重惩罚</text>
+<rect x="470" y="190" width="170" height="72" rx="8" fill="#633806" stroke="#EF9F27" stroke-width="0.5"/>
+<text x="555" y="212" font-size="13" font-weight="500" fill="#FAC775" text-anchor="middle" dominant-baseline="central">尝试 #2（仅一次）</text>
+<text x="555" y="230" font-size="11" font-weight="400" fill="#FAC775" text-anchor="middle" dominant-baseline="central">原 messages + 失败反馈</text>
+<text x="555" y="248" font-size="11" font-weight="400" fill="#FAC775" text-anchor="middle" dominant-baseline="central">temperature ↓ · 同一请求</text>
+<rect x="250" y="330" width="190" height="72" rx="8" fill="#791F1F" stroke="#F09595" stroke-width="0.5"/>
+<text x="345" y="352" font-size="13" font-weight="500" fill="#F7C1C1" text-anchor="middle" dominant-baseline="central">兜底：unknown → DM</text>
+<text x="345" y="370" font-size="11" font-weight="400" fill="#F7C1C1" text-anchor="middle" dominant-baseline="central">超时 / 取消 / 5xx 不重试</text>
+<text x="345" y="388" font-size="11" font-weight="400" fill="#F7C1C1" text-anchor="middle" dominant-baseline="central">失败分类 + retry-rate 计数</text>
+<line x1="100" y1="166" x2="100" y2="206" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#arrow2)"/>
+<line x1="160" y1="224" x2="246" y2="94" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#arrow2)"/>
+<text x="178" y="152" font-size="11" font-weight="400" fill="#97C459">成功</text>
+<line x1="160" y1="238" x2="246" y2="216" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#arrow2)"/>
+<text x="164" y="182" font-size="11" font-weight="400" fill="#EF9F27">格式 / 校验失败</text>
+<line x1="160" y1="252" x2="246" y2="360" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#arrow2)"/>
+<text x="164" y="312" font-size="11" font-weight="400" fill="#F09595">超时 / 取消 / 5xx</text>
+<line x1="440" y1="218" x2="466" y2="218" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#arrow2)"/>
+<text x="446" y="206" font-size="11" font-weight="400" fill="#EF9F27">通过</text>
+<line x1="345" y1="246" x2="345" y2="326" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#arrow2)"/>
+<text x="352" y="290" font-size="11" font-weight="400" fill="#EF9F27">否 · 预算不足</text>
+<path d="M 555 190 V 88 H 444" fill="none" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#arrow2)"/>
+<text x="563" y="140" font-size="11" font-weight="400" fill="#97C459">成功</text>
+<path d="M 555 262 V 358 H 444" fill="none" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#arrow2)"/>
+<text x="563" y="322" font-size="11" font-weight="400" fill="#F09595">仍失败</text>
+<rect x="40" y="414" width="600" height="64" rx="8" fill="none" stroke="#5F5E5A" stroke-width="0.5" stroke-dasharray="5 4"/>
+<text x="52" y="438" font-size="11" font-weight="400" fill="#B4B2A9">封闭边界：两次尝试全部封闭在 NluLlmManager 内部 · 对外 1 个逻辑请求 · 失败尝试不写会话历史</text>
+<text x="52" y="460" font-size="11" font-weight="400" fill="#B4B2A9">retry-rate 是健康探针：grammar 生效后应 ≈ 0；爬升说明该修 prompt / schema，而非加重试</text>
+</svg>

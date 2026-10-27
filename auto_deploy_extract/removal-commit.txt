@@ -1,0 +1,7 @@
+﻿commit 3195913ffd2f23ab880284c526f101b3f4f49741
+Author: Bala Marimuthu <246387390+bmarimuthu-nv@users.noreply.github.com>
+Date:   Wed Sep 23 19:17:24 2026 -0700
+
+    [None][chore] BREAKING: Remove AutoDeploy from TensorRT-LLM (#19028)
+    
+    Signed-off-by: Balamurugan Marimuthu <246387390+bmarimuthu-nv@users.noreply.github.com>

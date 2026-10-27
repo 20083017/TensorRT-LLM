@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>AutoDeploy 系统设计图集</title>
+<style>
+body{margin:0;background:#16161b;color:#e8e8ea;font-family:-apple-system,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;padding:28px 16px}
+.wrap{max-width:760px;margin:0 auto}
+h1{font-size:18px;font-weight:500;margin:0 0 4px}
+h2{font-size:15px;font-weight:500;margin:36px 0 10px;color:#cfcfe0;border-left:3px solid #534AB7;padding-left:10px}
+p.meta{font-size:12px;color:#8a8a92;margin:0 0 8px}
+svg{width:100%;height:auto;display:block;margin:6px 0 10px}
+svg text{font-family:-apple-system,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif}
+.th{font-size:14px;font-weight:500}
+.ts{font-size:12px}
+ul.notes{margin:0;padding-left:20px;font-size:13px;line-height:1.8;color:#b4b4bc}
+ul.notes li{margin:2px 0}
+ul.notes b{color:#e8e8ea;font-weight:500}
+.ds-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media (max-width:640px){.ds-grid{grid-template-columns:1fr}}
+.card{background:#222228;border:1px solid #3a3a42;border-radius:12px;padding:10px 14px}
+.card h4{margin:0;font-size:13px;font-weight:500;color:#e8e8ea}
+.card .tag{font-size:11px;color:#8a8a92;margin-left:6px}
+.card ul{margin:4px 0 0;padding-left:14px;font-family:ui-monospace,Consolas,'Courier New',monospace;font-size:11px;line-height:1.7;color:#b4b4bc}
+h3{font-size:13px;font-weight:500;color:#e8e8ea;margin:14px 0 6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>AutoDeploy 系统设计图集</h1>
+<p class="meta">基于 TensorRT-LLM commit e7eb2de0e1b（AutoDeploy 移除前最后版本）源码绘制；主仓库已由 PR #19028 将其剥离为独立包 Paragraf/llmc。</p>
+
+<h2>图 1 · 系统分层设计</h2>
+<svg viewBox="0 0 680 776" role="img">
+<title>AutoDeploy 系统分层设计</title>
+<defs>
+<marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+<path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+</marker>
+</defs>
+<g>
+<rect x="40" y="40" width="180" height="56" rx="8" fill="#0C447C" stroke="#85B7EB" stroke-width="0.5"/>
+<text class="th" x="130" y="58" text-anchor="middle" dominant-baseline="central" fill="#B5D4F4">LLM API</text>
+<text class="ts" x="130" y="78" text-anchor="middle" dominant-baseline="central" fill="#85B7EB">generate / await_async</text>
+</g>
+<g>
+<rect x="250" y="40" width="190" height="56" rx="8" fill="#0C447C" stroke="#85B7EB" stroke-width="0.5"/>
+<text class="th" x="345" y="58" text-anchor="middle" dominant-baseline="central" fill="#B5D4F4">trtllm-serve</text>
+<text class="ts" x="345" y="78" text-anchor="middle" dominant-baseline="central" fill="#85B7EB">OpenAI REST + gRPC</text>
+</g>
+<g>
+<rect x="470" y="40" width="170" height="56" rx="8" fill="#0C447C" stroke="#85B7EB" stroke-width="0.5"/>
+<text class="th" x="555" y="58" text-anchor="middle" dominant-baseline="central" fill="#B5D4F4">LlmArgs 配置</text>
+<text class="ts" x="555" y="78" text-anchor="middle" dominant-baseline="central" fill="#85B7EB">CLI&gt;registry&gt;default</text>
+</g>
+<path d="M130,96 L130,138" fill="none" stroke="#B4B2A9" stroke-width="1" marker-end="url(#arrow)"/>
+<path d="M345,96 L345,138" fill="none" stroke="#B4B2A9" stroke-width="1" marker-end="url(#arrow)"/>
+<path d="M555,96 L555,138" fill="none" stroke="#B4B2A9" stroke-width="1" marker-end="url(#arrow)"/>
+<rect x="40" y="140" width="600" height="150" rx="16" fill="#26215C" stroke="#7F77DD" stroke-width="0.5"/>
+<text class="ts" x="60" y="164" fill="#AFA9EC">编译期 · InferenceOptimizer（transform 流水线，Stages 强制排序）</text>
+<g>
+<rect x="60" y="190" width="136" height="56" rx="8" fill="#3C3489" stroke="#AFA9EC" stroke-width="0.5"/>
+<text class="th" x="128" y="208" text-anchor="middle" dominant-baseline="central" fill="#CECBF6">ModelFactory</text>
+<text class="ts" x="128" y="228" text-anchor="middle" dominant-baseline="central" fill="#AFA9EC">HF 原始建模</text>
+</g>
+<g>
+<rect x="214" y="190" width="136" height="56" rx="8" fill="#3C3489" stroke="#AFA9EC" stroke-width="0.5"/>
+<text class="th" x="282" y="208" text-anchor="middle" dominant-baseline="central" fill="#CECBF6">pattern+sharding</text>
+<text class="ts" x="282" y="228" text-anchor="middle" dominant-baseline="central" fill="#AFA9EC">IR 标准化·切分</text>
+</g>
+<g>
+<rect x="368" y="190" width="136" height="56" rx="8" fill="#3C3489" stroke="#AFA9EC" stroke-width="0.5"/>
+<text class="th" x="436" y="208" text-anchor="middle" dominant-baseline="central" fill="#CECBF6">weight+fusion</text>
+<text class="ts" x="436" y="228" text-anchor="middle" dominant-baseline="central" fill="#AFA9EC">上卡·融合量化</text>
+</g>
+<g>
+<rect x="522" y="190" width="118" height="56" rx="8" fill="#3C3489" stroke="#AFA9EC" stroke-width="0.5"/>
+<text class="th" x="581" y="208" text-anchor="middle" dominant-baseline="central" fill="#CECBF6">cache+compile</text>
+<text class="ts" x="581" y="228" text-anchor="middle" dominant-baseline="central" fill="#AFA9EC">KV·图编译</text>
+</g>
+<path d="M340,290 L340,328" fill="none" stroke="#B4B2A9" stroke-width="1" marker-end="url(#arrow)"/>
+<text class="ts" x="352" y="310" fill="#B4B2A9">注入优化后模型</text>
+<rect x="40" y="330" width="600" height="140" rx="16" fill="#042C53" stroke="#378ADD" stroke-width="0.5"/>
+<text class="ts" x="60" y="354" fill="#85B7EB">Shim 集成层 · ADEngine (ModelEngine)</text>
+<g>
+<rect x="70" y="380" width="180" height="56" rx="8" fill="#0C447C" stroke="#85B7EB" stroke-width="0.5"/>
+<text class="th" x="160" y="398" text-anchor="middle" dominant-baseline="central" fill="#B5D4F4">CachedSeqInterface</text>
+<text class="ts" x="160" y="418" text-anchor="middle" dominant-baseline="central" fill="#85B7EB">SequenceInfo·KV 配置</text>
+</g>
+<g>
+<rect x="270" y="380" width="160" height="56" rx="8" fill="#0C447C" stroke="#85B7EB" stroke-width="0.5"/>
+<text class="th" x="350" y="398" text-anchor="middle" dominant-baseline="central" fill="#B5D4F4">prepare→forward</text>
+<text class="ts" x="350" y="418" text-anchor="middle" dominant-baseline="central" fill="#85B7EB">请求→张量→logits</text>
+</g>
+<g>
+<rect x="450" y="380" width="170" height="56" rx="8" fill="#0C447C" stroke="#85B7EB" stroke-width="0.5"/>
+<text class="th" x="535" y="398" text-anchor="middle" dominant-baseline="central" fill="#B5D4F4">pad for cudagraph</text>
+<text class="ts" x="535" y="418" text-anchor="middle" dominant-baseline="central" fill="#85B7EB">dummy 填批重放</text>
+</g>
+<path d="M240,470 L240,508" fill="none" stroke="#B4B2A9" stroke-width="1" marker-end="url(#arrow)"/>
+<text class="ts" x="252" y="492" fill="#B4B2A9">logits→采样</text>
+<path d="M440,508 L440,470" fill="none" stroke="#B4B2A9" stroke-width="1" marker-end="url(#arrow)"/>
+<text class="ts" x="452" y="492" fill="#B4B2A9">每迭代调 forward</text>
+<rect x="40" y="510" width="600" height="150" rx="16" fill="#042C53" stroke="#378ADD" stroke-width="0.5"/>
+<text class="ts" x="60" y="534" fill="#85B7EB">运行时 · PyExecutor（事件循环 worker 线程 · 手工装配）</text>
+<g>
+<rect x="56" y="560" width="136" height="56" rx="8" fill="#0C447C" stroke="#85B7EB" stroke-width="0.5"/>
+<text class="th" x="124" y="578" text-anchor="middle" dominant-baseline="central" fill="#B5D4F4">SimpleScheduler</text>
+<text class="ts" x="124" y="598" text-anchor="middle" dominant-baseline="central" fill="#85B7EB">容量+微批调度</text>
+</g>
+<g>
+<rect x="210" y="560" width="150" height="56" rx="8" fill="#0C447C" stroke="#85B7EB" stroke-width="0.5"/>
+<text class="th" x="285" y="578" text-anchor="middle" dominant-baseline="central" fill="#B5D4F4">ResourceManager</text>
+<text class="ts" x="285" y="598" text-anchor="middle" dominant-baseline="central" fill="#85B7EB">KV(C++)·SeqSlot</text>
+</g>
+<g>
+<rect x="380" y="560" width="120" height="56" rx="8" fill="#0C447C" stroke="#85B7EB" stroke-width="0.5"/>
+<text class="th" x="440" y="578" text-anchor="middle" dominant-baseline="central" fill="#B5D4F4">TorchSampler</text>
+<text class="ts" x="440" y="598" text-anchor="middle" dominant-baseline="central" fill="#85B7EB">Spec/SpecSampler</text>
+</g>
+<g>
+<rect x="520" y="560" width="120" height="56" rx="8" fill="#0C447C" stroke="#85B7EB" stroke-width="0.5"/>
+<text class="th" x="580" y="578" text-anchor="middle" dominant-baseline="central" fill="#B5D4F4">Guided·Transcv</text>
+<text class="ts" x="580" y="598" text-anchor="middle" dominant-baseline="central" fill="#85B7EB">结构化·disagg</text>
+</g>
+<path d="M340,660 L340,698" fill="none" stroke="#B4B2A9" stroke-width="1" marker-end="url(#arrow)"/>
+<text class="ts" x="352" y="680" fill="#B4B2A9">kernel / 通信</text>
+<g>
+<rect x="40" y="700" width="290" height="56" rx="8" fill="#444441" stroke="#B4B2A9" stroke-width="0.5"/>
+<text class="th" x="185" y="718" text-anchor="middle" dominant-baseline="central" fill="#F1EFE8">GPU 执行</text>
+<text class="ts" x="185" y="738" text-anchor="middle" dominant-baseline="central" fill="#D3D1C7">CUDA Graph·piecewise·flashinfer/triton</text>
+</g>
+<g>
+<rect x="360" y="700" width="280" height="56" rx="8" fill="#444441" stroke="#B4B2A9" stroke-width="0.5"/>
+<text class="th" x="500" y="718" text-anchor="middle" dominant-baseline="central" fill="#F1EFE8">分布式通信</text>
+<text class="ts" x="500" y="738" text-anchor="middle" dominant-baseline="central" fill="#D3D1C7">NCCL / MPI · TP·EP·PP</text>
+</g>
+</svg>
+<ul class="notes">
+<li><b>核心策略</b>：HF 原始模型直接作输入，优化全部移入图变换流水线；运行时复用同一个 PyExecutor。</li>
+<li><b>shim 是手工装配路径</b>：create_autodeploy_executor 逐项拼 PyExecutor kwargs——历史漏洞（漏传 garbage_collection_gen0_threshold）即源于此。</li>
+</ul>
+
+<h2>图 2 · 运行时线程模型</h2>
+<svg viewBox="0 0 680 776" role="img">
+<title>AutoDeploy 运行时线程模型</title>
+<defs>
+<marker id="arrow2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+<path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+</marker>
+</defs>
+<rect x="40" y="40" width="300" height="400" rx="16" fill="#042C53" stroke="#378ADD" stroke-width="0.5"/>
+<text class="ts" x="60" y="64" fill="#85B7EB">客户端 / 主线程（可多个）</text>
+<g>
+<rect x="60" y="90" width="260" height="56" rx="8" fill="#0C447C" stroke="#85B7EB" stroke-width="0.5"/>
+<text class="th" x="190" y="108" text-anchor="middle" dominant-baseline="central" fill="#B5D4F4">generate / await</text>
+<text class="ts" x="190" y="128" text-anchor="middle" dominant-baseline="central" fill="#85B7EB">await_async_response 阻塞等待</text>
+</g>
+<g>
+<rect x="60" y="170" width="260" height="56" rx="8" fill="#0C447C" stroke="#85B7EB" stroke-width="0.5"/>
+<text class="th" x="190" y="188" text-anchor="middle" dominant-baseline="central" fill="#B5D4F4">submit(request)</text>
+<text class="ts" x="190" y="208" text-anchor="middle" dominant-baseline="central" fill="#85B7EB">tokenize 后入队</text>
+</g>
+<g>
+<rect x="60" y="250" width="260" height="56" rx="8" fill="#0C447C" stroke="#85B7EB" stroke-width="0.5"/>
+<text class="th" x="190" y="268" text-anchor="middle" dominant-baseline="central" fill="#B5D4F4">ExecutorRequestQueue</text>
+<text class="ts" x="190" y="288" text-anchor="middle" dominant-baseline="central" fill="#85B7EB">线程安全入口·批等待</text>
+</g>
+<g>
+<rect x="60" y="330" width="260" height="56" rx="8" fill="#0C447C" stroke="#85B7EB" stroke-width="0.5"/>
+<text class="th" x="190" y="348" text-anchor="middle" dominant-baseline="central" fill="#B5D4F4">responses / result_wait</text>
+<text class="ts" x="190" y="368" text-anchor="middle" dominant-baseline="central" fill="#85B7EB">response_cv 唤醒消费</text>
+</g>
+<rect x="360" y="40" width="280" height="400" rx="16" fill="#26215C" stroke="#7F77DD" stroke-width="0.5"/>
+<text class="ts" x="380" y="64" fill="#AFA9EC">worker 线程（事件循环 _event_loop_wrapper）</text>
+<g>
+<rect x="380" y="90" width="240" height="56" rx="8" fill="#3C3489" stroke="#AFA9EC" stroke-width="0.5"/>
+<text class="th" x="500" y="108" text-anchor="middle" dominant-baseline="central" fill="#CECBF6">fetch + 调度</text>
+<text class="ts" x="500" y="128" text-anchor="middle" dominant-baseline="central" fill="#AFA9EC">容量·微批·分块 prefill</text>
+</g>
+<g>
+<rect x="380" y="170" width="240" height="56" rx="8" fill="#3C3489" stroke="#AFA9EC" stroke-width="0.5"/>
+<text class="th" x="500" y="188" text-anchor="middle" dominant-baseline="central" fill="#CECBF6">_prepare_inputs</text>
+<text class="ts" x="500" y="208" text-anchor="middle" dominant-baseline="central" fill="#AFA9EC">请求→SequenceInfo 张量</text>
+</g>
+<g>
+<rect x="380" y="250" width="240" height="56" rx="8" fill="#3C3489" stroke="#AFA9EC" stroke-width="0.5"/>
+<text class="th" x="500" y="268" text-anchor="middle" dominant-baseline="central" fill="#CECBF6">forward→sample_async</text>
+<text class="ts" x="500" y="288" text-anchor="middle" dominant-baseline="central" fill="#AFA9EC">GPU enqueue·采样</text>
+</g>
+<g>
+<rect x="380" y="330" width="240" height="56" rx="8" fill="#3C3489" stroke="#AFA9EC" stroke-width="0.5"/>
+<text class="th" x="500" y="348" text-anchor="middle" dominant-baseline="central" fill="#CECBF6">update + publish</text>
+<text class="ts" x="500" y="368" text-anchor="middle" dominant-baseline="central" fill="#AFA9EC">response_lock 下发布响应</text>
+</g>
+<path d="M320,278 L380,278" fill="none" stroke="#B4B2A9" stroke-width="1" marker-end="url(#arrow2)"/>
+<text class="ts" x="350" y="268" text-anchor="middle" dominant-baseline="central" fill="#B4B2A9">请求</text>
+<path d="M380,358 L320,358" fill="none" stroke="#B4B2A9" stroke-width="1" marker-end="url(#arrow2)"/>
+<text class="ts" x="350" y="348" text-anchor="middle" dominant-baseline="central" fill="#B4B2A9">响应</text>
+<path d="M190,440 L133,468" fill="none" stroke="#888780" stroke-width="0.5" stroke-dasharray="4 3"/>
+<path d="M500,440 L546,468" fill="none" stroke="#888780" stroke-width="0.5" stroke-dasharray="4 3"/>
+<g>
+<rect x="40" y="470" width="186" height="56" rx="8" fill="#444441" stroke="#B4B2A9" stroke-width="0.5"/>
+<text class="th" x="133" y="488" text-anchor="middle" dominant-baseline="central" fill="#F1EFE8">broadcast_sample_state</text>
+<text class="ts" x="133" y="508" text-anchor="middle" dominant-baseline="central" fill="#D3D1C7">仅 PP&gt;1·专用 MPI comm</text>
+</g>
+<g>
+<rect x="246" y="470" width="186" height="56" rx="8" fill="#444441" stroke="#B4B2A9" stroke-width="0.5"/>
+<text class="th" x="339" y="488" text-anchor="middle" dominant-baseline="central" fill="#F1EFE8">sleep_wakeup_listener</text>
+<text class="ts" x="339" y="508" text-anchor="middle" dominant-baseline="central" fill="#D3D1C7">rank≠0·sleep 模式</text>
+</g>
+<g>
+<rect x="452" y="470" width="188" height="56" rx="8" fill="#444441" stroke="#B4B2A9" stroke-width="0.5"/>
+<text class="th" x="546" y="488" text-anchor="middle" dominant-baseline="central" fill="#F1EFE8">sampler async worker</text>
+<text class="ts" x="546" y="508" text-anchor="middle" dominant-baseline="central" fill="#D3D1C7">采样结果 D2H 拷贝</text>
+</g>
+<rect x="40" y="560" width="600" height="110" rx="16" fill="#2C2C2A" stroke="#888780" stroke-width="0.5"/>
+<text class="ts" x="60" y="584" fill="#D3D1C7">同步原语与生命周期（daemon 线程，随进程退出）</text>
+<text class="ts" x="60" y="612" fill="#B4B2A9">response_lock + response_cv ─ 响应发布 / 唤醒（客户端 ↔ worker）</text>
+<text class="ts" x="60" y="636" fill="#B4B2A9">control_request_barrier / control_action_done ─ 控制请求两段式确认</text>
+<text class="ts" x="60" y="660" fill="#B4B2A9">shutdown_event ─ 退出；finish_sample_event ─ CUDA 事件同步；hang detector 硬杀</text>
+<g>
+<rect x="40" y="700" width="600" height="56" rx="8" fill="#444441" stroke="#B4B2A9" stroke-width="0.5"/>
+<text class="th" x="340" y="718" text-anchor="middle" dominant-baseline="central" fill="#F1EFE8">Overlap 调度（可关）</text>
+<text class="ts" x="340" y="738" text-anchor="middle" dominant-baseline="central" fill="#D3D1C7">CPU 组下一迭代输入 ∥ GPU 算当前 forward；CUDA graph 以 dummy request 填充对齐</text>
+</g>
+</svg>
+<ul class="notes">
+<li><b>事件循环错误传播</b>：worker 抛异常（如 KV OOM）→ 存入 _event_loop_error → 客户端线程 re-raise，防止挂死。</li>
+<li><b>MPI 线程安全</b>：所有 MPI_Comm_dup 必须在 worker 线程启动前于主线程完成，避免竞态。</li>
+</ul>
+
+<h2>图 3 · 数据结构总览</h2>
+<h3>① 配置层（Pydantic）</h3>
+<div class="ds-grid">
+<div class="card"><h4>LlmArgs / AutoDeployConfig<span class="tag">入口配置</span></h4><ul>
+<li>transforms: Mapping[name → kwargs]</li>
+<li>优先级: CLI &gt; yaml-extra &gt; registry &gt; default.yaml</li>
+<li>model / world_size / kv_cache_config</li>
+<li>speculative_config / attn·compile backend</li>
+</ul></div>
+<div class="card"><h4>TransformConfig<span class="tag">transform 契约</span></h4><ul>
+<li>stage: Stages（强制排序依据）</li>
+<li>run_per_gm / enabled / skip_on_error</li>
+<li>requires_clean_graph / requires_shape_prop</li>
+<li>run_graph_cleanup / run_shape_prop</li>
+<li>expect_mem_change（显存审计）</li>
+</ul></div>
+<div class="card"><h4>SharedConfig<span class="tag">全流水线共享</span></h4><ul>
+<li>local_rank / world_size</li>
+<li>dist_config: DistConfig(tp·ep·pp)</li>
+<li>enable_attention_dp</li>
+</ul></div>
+<div class="card"><h4>Stages<span class="tag">有序枚举</span></h4><ul>
+<li>FACTORY→EXPORT→POST_EXPORT</li>
+<li>→PATTERN_MATCHER→SHARDING</li>
+<li>→WEIGHT_LOAD→POST_LOAD_FUSION</li>
+<li>→CACHE_INIT→VISUALIZE→COMPILE</li>
+</ul></div>
+</div>
+<h3>② 流水线状态（挂在 GraphModule 上）</h3>
+<div class="ds-grid">
+<div class="card"><h4>mod.meta["_autodeploy"]<span class="tag">图级元数据</span></h4><ul>
+<li>transform_history: name→TransformInfo</li>
+<li>mem_history: name→{pre,post MemStats}</li>
+<li>前缀恢复 / pipeline cache key 依据</li>
+</ul></div>
+<div class="card"><h4>TransformInfo<span class="tag">变换结果</span></h4><ul>
+<li>skipped / num_matches</li>
+<li>is_clean / has_valid_shapes</li>
+<li>合并语义: | (pre) 与 &amp; (post)</li>
+</ul></div>
+</div>
+<h3>③ 运行时对象与队列</h3>
+<div class="ds-grid">
+<div class="card"><h4>CachedSequenceInterface<span class="tag">shim 核心</span></h4><ul>
+<li>info: SequenceInfo</li>
+<li>kv_cache_manager (C++)</li>
+<li>kv_group_windows / attention_type</li>
+<li>kernel_handles_cyclic_swa</li>
+</ul></div>
+<div class="card"><h4>SequenceInfo<span class="tag">每迭代 nest_sequences 写入</span></h4><ul>
+<li>input_ids / cu_seqlen / input_pos</li>
+<li>batch_info: prefill·extend·decode (n,tokens)</li>
+<li>cache_loc_per_pool / cu_num_pages_per_pool</li>
+<li>seq_len_with_cache_per_pool / slot_idx</li>
+<li>named_args = 模型 kwargs (**extra_args)</li>
+</ul></div>
+<div class="card"><h4>LlmRequest<span class="tag">请求对象</span></h4><ul>
+<li>py_request_id / py_seq_slot / py_batch_idx</li>
+<li>context_current_position（块复用起点）</li>
+<li>context_chunk_size（chunked prefill）</li>
+<li>py_prompt_len / py_draft_tokens</li>
+<li>py_multimodal_data / is_cuda_graph_dummy</li>
+</ul></div>
+<div class="card"><h4>ScheduledRequests<span class="tag">调度产物</span></h4><ul>
+<li>context_requests / generation_requests</li>
+<li>extend_requests（spec dec）</li>
+<li>batch_size / can_run_cuda_graph</li>
+<li>generation_requests 可被 dummy 填充</li>
+</ul></div>
+<div class="card"><h4>队列与同步<span class="tag">线程间</span></h4><ul>
+<li>ExecutorRequestQueue(dist 感知)</li>
+<li>WaitingQueue（策略可换）</li>
+<li>responses{} + result_wait_queues</li>
+<li>response_lock / response_cv</li>
+<li>control_request_barrier / shutdown_event</li>
+</ul></div>
+<div class="card"><h4>ResourceManager<span class="tag">资源注册表</span></h4><ul>
+<li>KV_CACHE_MANAGER: KVCacheManager(C++)</li>
+<li>&nbsp;&nbsp;tokens_per_block / mamba_cache_index</li>
+<li>SEQ_SLOT_MANAGER: SeqSlotManager</li>
+<li>move_to_end: KV 最后释放</li>
+</ul></div>
+</div>
+<ul class="notes" style="margin-top:10px">
+<li><b>设计要点</b>：配置（Pydantic strict 化）→ 图级元数据（TransformInfo 携带 clean/shape 状态避免重复清理）→ 运行时 C++/Python 边界（KVCacheManager 走 pybind）。</li>
+</ul>
+
+<h2>图 4 · 数据流阶段图</h2>
+<svg viewBox="0 0 680 856" role="img">
+<title>AutoDeploy 数据流阶段图</title>
+<defs>
+<marker id="arrow4" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+<path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+</marker>
+</defs>
+<rect x="40" y="40" width="600" height="296" rx="16" fill="#26215C" stroke="#7F77DD" stroke-width="0.5"/>
+<text class="ts" x="60" y="62" fill="#AFA9EC">① 构建期数据流 · InferenceOptimizer（一次性，mod=None 可从前缀恢复）</text>
+<text x="112" y="94" text-anchor="middle" fill="#AFA9EC" font-size="11">输入</text>
+<text x="226" y="94" text-anchor="middle" fill="#AFA9EC" font-size="11">factory</text>
+<text x="340" y="94" text-anchor="middle" fill="#AFA9EC" font-size="11">export</text>
+<text x="454" y="94" text-anchor="middle" fill="#AFA9EC" font-size="11">pattern_matcher</text>
+<text x="568" y="94" text-anchor="middle" fill="#AFA9EC" font-size="11">sharding</text>
+<g>
+<rect x="60" y="100" width="104" height="56" rx="8" fill="#3C3489" stroke="#AFA9EC" stroke-width="0.5"/>
+<text class="th" x="112" y="118" text-anchor="middle" dominant-baseline="central" fill="#CECBF6">HF 权重</text>
+<text class="ts" x="112" y="138" text-anchor="middle" dominant-baseline="central" fill="#AFA9EC">checkpoint</text>
+</g>
+<g>
+<rect x="174" y="100" width="104" height="56" rx="8" fill="#3C3489" stroke="#AFA9EC" stroke-width="0.5"/>
+<text class="th" x="226" y="118" text-anchor="middle" dominant-baseline="central" fill="#CECBF6">meta 模型</text>
+<text class="ts" x="226" y="138" text-anchor="middle" dominant-baseline="central" fill="#AFA9EC">空壳·零显存</text>
+</g>
+<g>
+<rect x="288" y="100" width="104" height="56" rx="8" fill="#3C3489" stroke="#AFA9EC" stroke-width="0.5"/>
+<text class="th" x="340" y="118" text-anchor="middle" dominant-baseline="central" fill="#CECBF6">FX 图</text>
+<text class="ts" x="340" y="138" text-anchor="middle" dominant-baseline="central" fill="#AFA9EC">torch.export</text>
+</g>
+<g>
+<rect x="402" y="100" width="104" height="56" rx="8" fill="#3C3489" stroke="#AFA9EC" stroke-width="0.5"/>
+<text class="th" x="454" y="118" text-anchor="middle" dominant-baseline="central" fill="#CECBF6">统一 IR</text>
+<text class="ts" x="454" y="138" text-anchor="middle" dominant-baseline="central" fill="#AFA9EC">ops.auto_deploy</text>
+</g>
+<g>
+<rect x="516" y="100" width="104" height="56" rx="8" fill="#3C3489" stroke="#AFA9EC" stroke-width="0.5"/>
+<text class="th" x="568" y="118" text-anchor="middle" dominant-baseline="central" fill="#CECBF6">切分图</text>
+<text class="ts" x="568" y="138" text-anchor="middle" dominant-baseline="central" fill="#AFA9EC">TP/EP/AR</text>
+</g>
+<path d="M164,128 L174,128" fill="none" stroke="#B4B2A9" stroke-width="1" marker-end="url(#arrow4)"/>
+<path d="M278,128 L288,128" fill="none" stroke="#B4B2A9" stroke-width="1" marker-end="url(#arrow4)"/>
+<path d="M392,128 L402,128" fill="none" stroke="#B4B2A9" stroke-width="1" marker-end="url(#arrow4)"/>
+<path d="M506,128 L516,128" fill="none" stroke="#B4B2A9" stroke-width="1" marker-end="url(#arrow4)"/>
+<path d="M620,128 L634,128 L634,176 L112,176 L112,196" fill="none" stroke="#B4B2A9" stroke-width="1" marker-end="url(#arrow4)"/>
+<text x="112" y="194" text-anchor="middle" fill="#AFA9EC" font-size="11">weight_load</text>
+<text x="226" y="194" text-anchor="middle" fill="#AFA9EC" font-size="11">post_load_fusion</text>
+<text x="340" y="194" text-anchor="middle" fill="#AFA9EC" font-size="11">cache_init</text>
+<text x="454" y="194" text-anchor="middle" fill="#AFA9EC" font-size="11">compile</text>
+<text x="568" y="194" text-anchor="middle" fill="#AFA9EC" font-size="11">shim</text>
+<g>
+<rect x="60" y="200" width="104" height="56" rx="8" fill="#3C3489" stroke="#AFA9EC" stroke-width="0.5"/>
+<text class="th" x="112" y="218" text-anchor="middle" dominant-baseline="central" fill="#CECBF6">GPU 权重图</text>
+<text class="ts" x="112" y="238" text-anchor="middle" dominant-baseline="central" fill="#AFA9EC">按 shard 载入</text>
+</g>
+<g>
+<rect x="174" y="200" width="104" height="56" rx="8" fill="#3C3489" stroke="#AFA9EC" stroke-width="0.5"/>
+<text class="th" x="226" y="218" text-anchor="middle" dominant-baseline="central" fill="#CECBF6">融合图</text>
+<text class="ts" x="226" y="238" text-anchor="middle" dominant-baseline="central" fill="#AFA9EC">fp8/moe/norm</text>
+</g>
+<g>
+<rect x="288" y="200" width="104" height="56" rx="8" fill="#3C3489" stroke="#AFA9EC" stroke-width="0.5"/>
+<text class="th" x="340" y="218" text-anchor="middle" dominant-baseline="central" fill="#CECBF6">KV cache 图</text>
+<text class="ts" x="340" y="238" text-anchor="middle" dominant-baseline="central" fill="#AFA9EC">cached attn</text>
+</g>
+<g>
+<rect x="402" y="200" width="104" height="56" rx="8" fill="#3C3489" stroke="#AFA9EC" stroke-width="0.5"/>
+<text class="th" x="454" y="218" text-anchor="middle" dominant-baseline="central" fill="#CECBF6">编译产物</text>
+<text class="ts" x="454" y="238" text-anchor="middle" dominant-baseline="central" fill="#AFA9EC">cuda graph</text>
+</g>
+<g>
+<rect x="516" y="200" width="104" height="56" rx="8" fill="#534AB7" stroke="#CECBF6" stroke-width="0.5"/>
+<text class="th" x="568" y="218" text-anchor="middle" dominant-baseline="central" fill="#EEEDFE">ADEngine</text>
+<text class="ts" x="568" y="238" text-anchor="middle" dominant-baseline="central" fill="#CECBF6">可执行模型</text>
+</g>
+<path d="M164,228 L174,228" fill="none" stroke="#B4B2A9" stroke-width="1" marker-end="url(#arrow4)"/>
+<path d="M278,228 L288,228" fill="none" stroke="#B4B2A9" stroke-width="1" marker-end="url(#arrow4)"/>
+<path d="M392,228 L402,228" fill="none" stroke="#B4B2A9" stroke-width="1" marker-end="url(#arrow4)"/>
+<path d="M506,228 L516,228" fill="none" stroke="#B4B2A9" stroke-width="1" marker-end="url(#arrow4)"/>
+<rect x="60" y="272" width="560" height="44" rx="8" fill="none" stroke="#B4B2A9" stroke-width="0.5" stroke-dasharray="4 3"/>
+<text class="ts" x="340" y="296" text-anchor="middle" dominant-baseline="central" fill="#B4B2A9">pipeline cache：各 transform 后 checkpoint，重建时从最近可恢复前缀跳过已完成阶段</text>
+<rect x="40" y="376" width="600" height="460" rx="16" fill="#042C53" stroke="#378ADD" stroke-width="0.5"/>
+<text class="ts" x="60" y="398" fill="#85B7EB">② 运行期数据流 · PyExecutor 事件循环（每迭代）</text>
+<g>
+<rect x="60" y="420" width="280" height="56" rx="8" fill="#0C447C" stroke="#85B7EB" stroke-width="0.5"/>
+<text class="th" x="200" y="438" text-anchor="middle" dominant-baseline="central" fill="#B5D4F4">prompt → tokens</text>
+<text class="ts" x="200" y="458" text-anchor="middle" dominant-baseline="central" fill="#85B7EB">tokenize 后入队</text>
+</g>
+<g>
+<rect x="60" y="488" width="280" height="56" rx="8" fill="#0C447C" stroke="#85B7EB" stroke-width="0.5"/>
+<text class="th" x="200" y="506" text-anchor="middle" dominant-baseline="central" fill="#B5D4F4">ExecutorRequestQueue</text>
+<text class="ts" x="200" y="526" text-anchor="middle" dominant-baseline="central" fill="#85B7EB">批等待·dist 广播</text>
+</g>
+<g>
+<rect x="60" y="556" width="280" height="56" rx="8" fill="#0C447C" stroke="#85B7EB" stroke-width="0.5"/>
+<text class="th" x="200" y="574" text-anchor="middle" dominant-baseline="central" fill="#B5D4F4">ScheduledRequests</text>
+<text class="ts" x="200" y="594" text-anchor="middle" dominant-baseline="central" fill="#85B7EB">context / gen / extend</text>
+</g>
+<g>
+<rect x="60" y="624" width="280" height="56" rx="8" fill="#0C447C" stroke="#85B7EB" stroke-width="0.5"/>
+<text class="th" x="200" y="642" text-anchor="middle" dominant-baseline="central" fill="#B5D4F4">SequenceInfo</text>
+<text class="ts" x="200" y="662" text-anchor="middle" dominant-baseline="central" fill="#85B7EB">ids·cu_seqlen·cache_loc</text>
+</g>
+<g>
+<rect x="60" y="692" width="280" height="56" rx="8" fill="#0C447C" stroke="#85B7EB" stroke-width="0.5"/>
+<text class="th" x="200" y="710" text-anchor="middle" dominant-baseline="central" fill="#B5D4F4">model(**named_args)</text>
+<text class="ts" x="200" y="730" text-anchor="middle" dominant-baseline="central" fill="#85B7EB">cuda graph 重放</text>
+</g>
+<g>
+<rect x="60" y="760" width="280" height="56" rx="8" fill="#0C447C" stroke="#85B7EB" stroke-width="0.5"/>
+<text class="th" x="200" y="778" text-anchor="middle" dominant-baseline="central" fill="#B5D4F4">logits → sampler</text>
+<text class="ts" x="200" y="798" text-anchor="middle" dominant-baseline="central" fill="#85B7EB">gather·fp32·采样</text>
+</g>
+<path d="M200,476 L200,486" fill="none" stroke="#B4B2A9" stroke-width="1" marker-end="url(#arrow4)"/>
+<path d="M200,544 L200,554" fill="none" stroke="#B4B2A9" stroke-width="1" marker-end="url(#arrow4)"/>
+<path d="M200,612 L200,622" fill="none" stroke="#B4B2A9" stroke-width="1" marker-end="url(#arrow4)"/>
+<path d="M200,680 L200,690" fill="none" stroke="#B4B2A9" stroke-width="1" marker-end="url(#arrow4)"/>
+<path d="M200,748 L200,758" fill="none" stroke="#B4B2A9" stroke-width="1" marker-end="url(#arrow4)"/>
+<path d="M60,788 C44,788 44,584 58,584" fill="none" stroke="#888780" stroke-width="0.5" stroke-dasharray="4 3" marker-end="url(#arrow4)"/>
+<text class="ts" x="200" y="754" text-anchor="middle" dominant-baseline="central" fill="#B4B2A9">decode 循环：采样 token 写回请求</text>
+<g>
+<rect x="380" y="676" width="240" height="56" rx="8" fill="#0C447C" stroke="#85B7EB" stroke-width="0.5"/>
+<text class="th" x="500" y="694" text-anchor="middle" dominant-baseline="central" fill="#B5D4F4">KV cache 读写</text>
+<text class="ts" x="500" y="714" text-anchor="middle" dominant-baseline="central" fill="#85B7EB">C++ 分页池·多窗口</text>
+</g>
+<path d="M340,720 L380,704" fill="none" stroke="#B4B2A9" stroke-width="1" marker-end="url(#arrow4)"/>
+<g>
+<rect x="380" y="760" width="240" height="56" rx="8" fill="#0C447C" stroke="#85B7EB" stroke-width="0.5"/>
+<text class="th" x="500" y="778" text-anchor="middle" dominant-baseline="central" fill="#B5D4F4">响应流</text>
+<text class="ts" x="500" y="798" text-anchor="middle" dominant-baseline="central" fill="#85B7EB">stream_interval·detok</text>
+</g>
+<path d="M340,788 L380,788" fill="none" stroke="#B4B2A9" stroke-width="1" marker-end="url(#arrow4)"/>
+</svg>
+<ul class="notes">
+<li><b>构建期本质</b>：数据形态五连跳——HF 权重 → meta 空模型 → FX 图 → 统一 IR 图 → 编译产物；权重在切分后才加载（直接按 shard 读）。</li>
+<li><b>运行期本质</b>：LlmRequest（Python 对象）→ SequenceInfo（扁平张量 kwargs）→ CUDA graph 重放；decode 循环不重建请求，只写回 token。</li>
+</ul>
+</div>
+</body>
+</html>

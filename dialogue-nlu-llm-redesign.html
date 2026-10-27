@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dialogue V3 · NLU-LLM 重构设计与问题清单</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 0 16px 64px;
+    background: #16191f; color: #D3D1C7;
+    font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    font-size: 14px; line-height: 1.75;
+  }
+  .page { max-width: 960px; margin: 0 auto; }
+  header { padding: 36px 0 8px; border-bottom: 1px solid #39414d; }
+  header h1 { font-size: 22px; font-weight: 600; margin: 0 0 10px; color: #EDEDF2; }
+  header .meta { color: #8D97A8; font-size: 12.5px; }
+  nav { padding: 14px 0; border-bottom: 1px solid #39414d; font-size: 13px; }
+  nav a { color: #85B7EB; text-decoration: none; margin-right: 18px; white-space: nowrap; }
+  nav a:hover { text-decoration: underline; }
+  h2 { font-size: 18px; font-weight: 600; color: #EDEDF2; margin: 44px 0 6px; padding-top: 8px; border-top: 1px solid #2A2F38; }
+  h2 .no { color: #85B7EB; margin-right: 8px; }
+  h3 { font-size: 15.5px; font-weight: 600; color: #EDEDF2; margin: 28px 0 6px; }
+  p { margin: 10px 0; }
+  ul, ol { margin: 10px 0; padding-left: 24px; }
+  li { margin: 4px 0; }
+  table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 13px; }
+  th, td { border: 1px solid #39414d; padding: 8px 10px; text-align: left; vertical-align: top; }
+  th { background: #1F242C; color: #C8CFDB; font-weight: 600; }
+  td { background: #1A1E24; }
+  code { font-family: Consolas, "JetBrains Mono", monospace; font-size: 12.5px; background: #22262E; border: 1px solid #39414D; border-radius: 4px; padding: 1px 5px; color: #E3B34D; }
+  pre { background: #1A1E24; border: 1px solid #39414D; border-radius: 8px; padding: 14px 16px; overflow-x: auto; font-size: 12.5px; line-height: 1.6; }
+  pre code { background: none; border: none; padding: 0; color: #C9D4E3; }
+  .fig { background: #1A1E24; border: 1px solid #39414D; border-radius: 10px; padding: 18px 14px 8px; margin: 18px 0; }
+  .fig svg { width: 100%; height: auto; display: block; }
+  .fig .cap { text-align: center; color: #8D97A8; font-size: 12px; padding: 8px 0 6px; }
+  .badge { display: inline-block; font-size: 11.5px; font-weight: 600; border-radius: 4px; padding: 1px 8px; margin-right: 8px; vertical-align: 1px; }
+  .b-p0 { background: #791F1F; color: #F7C1C1; }
+  .b-p1 { background: #633806; color: #FAC775; }
+  .b-p2 { background: #0C447C; color: #B5D4F4; }
+  .b-ok { background: #27500A; color: #C0DD97; }
+  .card { background: #1F242C; border: 1px solid #39414D; border-left: 3px solid #85B7EB; border-radius: 8px; padding: 14px 18px; margin: 16px 0; }
+  .card.warn { border-left-color: #F09595; }
+  .card.good { border-left-color: #97C459; }
+  .card p:first-child { margin-top: 0; }
+  .card p:last-child { margin-bottom: 0; }
+  .kv { color: #8D97A8; }
+  .field { color: #E3B34D; font-weight: 600; }
+  footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid #39414d; color: #6B7484; font-size: 12px; }
+  .toc { background: #1A1E24; border: 1px solid #39414D; border-radius: 8px; padding: 12px 20px; margin: 20px 0; font-size: 13.5px; }
+  .toc a { color: #85B7EB; text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+  .toc li { margin: 3px 0; }
+</style>
+</head>
+<body>
+<div class="page">
+
+<header>
+  <h1>Dialogue V3 · NLU-LLM 重构设计与问题清单</h1>
+  <div class="meta">
+    评审对象：Dialogue_v3_NLU_配置化改动方案（BuildRequest / HTTP+Offline 双路径 / ParseResponse / NluConfig→Model→Profile）<br>
+    依据：llama.cpp master（common/chat*.cpp、common/jinja）源码核对 · TensorRT-LLM 1.4.0rc2 源码核对 · LLaMA-Factory 能力矩阵<br>
+    结论速览：<span class="badge b-p0">P0 ×3</span><span class="badge b-p1">P1 ×3</span><span class="badge b-p2">P2 ×2</span><span class="badge b-ok">保留 ×5</span> · 2026-10-26
+  </div>
+</header>
+
+<nav>
+  <a href="#s0">0 结论</a><a href="#s1">1 问题清单</a><a href="#s2">2 重构设计</a><a href="#s3">3 失败出口</a><a href="#s4">4 配置模型</a><a href="#s5">5 解析细则</a><a href="#s6">6 落地顺序</a><a href="#s7">7 保留清单</a>
+</nav>
+
+<h2 id="s0"><span class="no">0</span>结论摘要</h2>
+<p>方案整体成立：解析侧架构（自定 nlu_10 协议 + 固定薄 parser + 全候选严格门 + 不发布部分语义）正是自控格式场景下的推荐落法，与 llama.cpp 的兼容性也良好。但它有一个系统性偏差——<b>把全部鲁棒性押在“事后解析”上，而“事前约束”完全缺席</b>。重构的核心只有一句话：</p>
+<div class="card good">
+  <p><b>事前语法约束（json_schema → GBNF）消灭格式失败，事后只留语义校验；每个失败都有定义好的出口（有界重试 → 兜底）；易变参数收进 Profile，协议保持冻结；思考行为显式受控。</b></p>
+</div>
+<p>原方案中“错误或不合适”的部分共 8 项，逐条详解见第 1 节；重构后的管线、失败出口、配置模型见第 2–4 节；可分五步落地、每步独立可回滚，见第 6 节。</p>
+
+<h2 id="s1"><span class="no">1</span>问题清单（必须改 / 建议改，逐条详解）</h2>
+<div class="fig"><svg viewBox="0 0 680 800" width="100%" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" role="img">
+<title>V3 配置方案问题地图</title>
+<desc>八个问题按 P0 P1 P2 分级：三个必须改、三个强烈建议、两个建议关注，底部绿色为原设计正确应保留项</desc>
+<text x="40" y="44" font-size="15" font-weight="500" fill="#D3D1C7">V3 配置方案问题地图 · 严重度分级</text>
+<text x="40" y="64" font-size="11" font-weight="400" fill="#B4B2A9">P0 = 必须改 · P1 = 强烈建议 · P2 = 建议关注 · 底部绿色 = 原设计正确、应保留</text>
+<rect x="40" y="92" width="292" height="140" rx="8" fill="#2C2C2A" stroke="#5F5E5A" stroke-width="0.5"/>
+<rect x="52" y="104" width="46" height="22" rx="4" fill="#791F1F" stroke="#F09595" stroke-width="0.5"/>
+<text x="75" y="116" font-size="11" font-weight="500" fill="#F7C1C1" text-anchor="middle" dominant-baseline="central">P0-1</text>
+<text x="106" y="119" font-size="12" font-weight="500" fill="#D3D1C7">生成侧约束缺失</text>
+<text x="52" y="142" font-size="11" font-weight="400" fill="#B4B2A9"><tspan fill="#F09595">问题：</tspan>BuildRequest 无 response_format，</text>
+<text x="52" y="158" font-size="11" font-weight="400" fill="#B4B2A9">格式鲁棒性全押事后解析</text>
+<text x="52" y="174" font-size="11" font-weight="400" fill="#B4B2A9"><tspan fill="#EF9F27">机制：</tspan>采样是软约束；0.6B + 量化后</text>
+<text x="52" y="190" font-size="11" font-weight="400" fill="#B4B2A9">指令跟随更弱，marker 漂移不可控</text>
+<text x="52" y="206" font-size="11" font-weight="400" fill="#B4B2A9"><tspan fill="#97C459">修正：</tspan>json_schema → GBNF 语法约束，</text>
+<text x="52" y="222" font-size="11" font-weight="400" fill="#B4B2A9">HTTP 与 offline 双路径均支持</text>
+<rect x="348" y="92" width="292" height="140" rx="8" fill="#2C2C2A" stroke="#5F5E5A" stroke-width="0.5"/>
+<rect x="360" y="104" width="46" height="22" rx="4" fill="#791F1F" stroke="#F09595" stroke-width="0.5"/>
+<text x="383" y="116" font-size="11" font-weight="500" fill="#F7C1C1" text-anchor="middle" dominant-baseline="central">P0-2</text>
+<text x="414" y="119" font-size="12" font-weight="500" fill="#D3D1C7">thinking 行为未定义</text>
+<text x="360" y="142" font-size="11" font-weight="400" fill="#B4B2A9"><tspan fill="#F09595">问题：</tspan>无思考控制；Qwen3-0.6B 默认先</text>
+<text x="360" y="158" font-size="11" font-weight="400" fill="#B4B2A9">输出 think 段再进正文</text>
+<text x="360" y="174" font-size="11" font-weight="400" fill="#B4B2A9"><tspan fill="#EF9F27">机制：</tspan>思考先耗 max_tokens，marker</text>
+<text x="360" y="190" font-size="11" font-weight="400" fill="#B4B2A9">偏移 / 截断，延迟不可控</text>
+<text x="360" y="206" font-size="11" font-weight="400" fill="#B4B2A9"><tspan fill="#97C459">修正：</tspan>/no_think（L2）→ SFT 烧死（L4），</text>
+<text x="360" y="222" font-size="11" font-weight="400" fill="#B4B2A9">S0 剥离常驻兜底（含未闭合）</text>
+<rect x="40" y="244" width="292" height="140" rx="8" fill="#2C2C2A" stroke="#5F5E5A" stroke-width="0.5"/>
+<rect x="52" y="256" width="46" height="22" rx="4" fill="#791F1F" stroke="#F09595" stroke-width="0.5"/>
+<text x="75" y="268" font-size="11" font-weight="500" fill="#F7C1C1" text-anchor="middle" dominant-baseline="central">P0-3</text>
+<text x="106" y="271" font-size="12" font-weight="500" fill="#D3D1C7">双路径渲染一致性未规定</text>
+<text x="52" y="294" font-size="11" font-weight="400" fill="#B4B2A9"><tspan fill="#F09595">问题：</tspan>Linux / Android 未强制同一模板</text>
+<text x="52" y="310" font-size="11" font-weight="400" fill="#B4B2A9">引擎与同一事实源</text>
+<text x="52" y="326" font-size="11" font-weight="400" fill="#B4B2A9"><tspan fill="#EF9F27">机制：</tspan>legacy 启发式与 --jinja 渲染</text>
+<text x="52" y="342" font-size="11" font-weight="400" fill="#B4B2A9">字节级不同 → 跨平台 marker 漂移</text>
+<text x="52" y="358" font-size="11" font-weight="400" fill="#B4B2A9"><tspan fill="#97C459">修正：</tspan>两侧 use_jinja=true；模板唯一</text>
+<text x="52" y="374" font-size="11" font-weight="400" fill="#B4B2A9">事实源 = GGUF，配置不留副本</text>
+<rect x="348" y="244" width="292" height="140" rx="8" fill="#2C2C2A" stroke="#5F5E5A" stroke-width="0.5"/>
+<rect x="360" y="256" width="46" height="22" rx="4" fill="#633806" stroke="#EF9F27" stroke-width="0.5"/>
+<text x="383" y="268" font-size="11" font-weight="500" fill="#FAC775" text-anchor="middle" dominant-baseline="central">P1-1</text>
+<text x="414" y="271" font-size="12" font-weight="500" fill="#D3D1C7">失败出口未定义</text>
+<text x="360" y="294" font-size="11" font-weight="400" fill="#B4B2A9"><tspan fill="#F09595">问题：</tspan>全候选不通过时系统去向未定义</text>
+<text x="360" y="310" font-size="11" font-weight="400" fill="#B4B2A9">（隐含直接 unknown 兜底）</text>
+<text x="360" y="326" font-size="11" font-weight="400" fill="#B4B2A9"><tspan fill="#EF9F27">机制：</tspan>grammar 消灭语法失败后，语义</text>
+<text x="360" y="342" font-size="11" font-weight="400" fill="#B4B2A9">失败仍需出口与噪声判别</text>
+<text x="360" y="358" font-size="11" font-weight="400" fill="#B4B2A9"><tspan fill="#97C459">修正：</tspan>有界 retry×1 + 失败反馈 + 预算</text>
+<text x="360" y="374" font-size="11" font-weight="400" fill="#B4B2A9">守卫 → 仍败 → unknown → DM</text>
+<rect x="40" y="396" width="292" height="140" rx="8" fill="#2C2C2A" stroke="#5F5E5A" stroke-width="0.5"/>
+<rect x="52" y="408" width="46" height="22" rx="4" fill="#633806" stroke="#EF9F27" stroke-width="0.5"/>
+<text x="75" y="420" font-size="11" font-weight="500" fill="#FAC775" text-anchor="middle" dominant-baseline="central">P1-2</text>
+<text x="106" y="423" font-size="12" font-weight="500" fill="#D3D1C7">采样参数耦合进协议</text>
+<text x="52" y="446" font-size="11" font-weight="400" fill="#B4B2A9"><tspan fill="#F09595">问题：</tspan>temp / top_k / max_tokens 写死在</text>
+<text x="52" y="462" font-size="11" font-weight="400" fill="#B4B2A9">共享 BuildRequest JSON 里</text>
+<text x="52" y="478" font-size="11" font-weight="400" fill="#B4B2A9"><tspan fill="#EF9F27">机制：</tspan>模型相关值混入跨模型协议；聊天</text>
+<text x="52" y="494" font-size="11" font-weight="400" fill="#B4B2A9">默认温度不适合决策型输出</text>
+<text x="52" y="510" font-size="11" font-weight="400" fill="#B4B2A9"><tspan fill="#97C459">修正：</tspan>参数移入 Profile（换模型=改配置）；</text>
+<text x="52" y="526" font-size="11" font-weight="400" fill="#B4B2A9">NLU 建议 temperature ≤ 0.2</text>
+<rect x="348" y="396" width="292" height="140" rx="8" fill="#2C2C2A" stroke="#5F5E5A" stroke-width="0.5"/>
+<rect x="360" y="408" width="46" height="22" rx="4" fill="#633806" stroke="#EF9F27" stroke-width="0.5"/>
+<text x="383" y="420" font-size="11" font-weight="500" fill="#FAC775" text-anchor="middle" dominant-baseline="central">P1-3</text>
+<text x="414" y="423" font-size="12" font-weight="500" fill="#D3D1C7">墙钟预算与打断缺失</text>
+<text x="360" y="446" font-size="11" font-weight="400" fill="#B4B2A9"><tspan fill="#F09595">问题：</tspan>stream:false 只有 token 上界；</text>
+<text x="360" y="462" font-size="11" font-weight="400" fill="#B4B2A9">barge-in 取消行为未定义</text>
+<text x="360" y="478" font-size="11" font-weight="400" fill="#B4B2A9"><tspan fill="#EF9F27">机制：</tspan>车机延迟硬预算 1.5–2s；超时 /</text>
+<text x="360" y="494" font-size="11" font-weight="400" fill="#B4B2A9">取消后重试 = 双重惩罚</text>
+<text x="360" y="510" font-size="11" font-weight="400" fill="#B4B2A9"><tspan fill="#97C459">修正：</tspan>T_total 墙钟 + 取消传播；</text>
+<text x="360" y="526" font-size="11" font-weight="400" fill="#B4B2A9">取消 / 超时一律不重试</text>
+<rect x="40" y="548" width="292" height="140" rx="8" fill="#2C2C2A" stroke="#5F5E5A" stroke-width="0.5"/>
+<rect x="52" y="560" width="46" height="22" rx="4" fill="#0C447C" stroke="#85B7EB" stroke-width="0.5"/>
+<text x="75" y="572" font-size="11" font-weight="500" fill="#B5D4F4" text-anchor="middle" dominant-baseline="central">P2-1</text>
+<text x="106" y="575" font-size="12" font-weight="500" fill="#D3D1C7">可观测性缺口</text>
+<text x="52" y="598" font-size="11" font-weight="400" fill="#B4B2A9"><tspan fill="#F09595">问题：</tspan>无失败分类计数、S0 命中率、</text>
+<text x="52" y="614" font-size="11" font-weight="400" fill="#B4B2A9">retry-rate 等运行指标</text>
+<text x="52" y="630" font-size="11" font-weight="400" fill="#B4B2A9"><tspan fill="#EF9F27">机制：</tspan>车规 OTA 排障需要代码与配置</text>
+<text x="52" y="646" font-size="11" font-weight="400" fill="#B4B2A9">之外的问题定位线索</text>
+<text x="52" y="662" font-size="11" font-weight="400" fill="#B4B2A9"><tspan fill="#97C459">修正：</tspan>四类失败计数 + S0 命中率 +</text>
+<text x="52" y="678" font-size="11" font-weight="400" fill="#B4B2A9">retry-rate 健康探针上报</text>
+<rect x="348" y="548" width="292" height="140" rx="8" fill="#2C2C2A" stroke="#5F5E5A" stroke-width="0.5"/>
+<rect x="360" y="560" width="46" height="22" rx="4" fill="#0C447C" stroke="#85B7EB" stroke-width="0.5"/>
+<text x="383" y="572" font-size="11" font-weight="500" fill="#B5D4F4" text-anchor="middle" dominant-baseline="central">P2-2</text>
+<text x="414" y="575" font-size="12" font-weight="500" fill="#D3D1C7">多候选成本未评估</text>
+<text x="360" y="598" font-size="11" font-weight="400" fill="#B4B2A9"><tspan fill="#F09595">问题：</tspan>全候选门下 n&gt;1 线性放大延迟</text>
+<text x="360" y="614" font-size="11" font-weight="400" fill="#B4B2A9">（车机延迟预算敏感）</text>
+<text x="360" y="630" font-size="11" font-weight="400" fill="#B4B2A9"><tspan fill="#EF9F27">机制：</tspan>grammar 落地后语义分歧概率</text>
+<text x="360" y="646" font-size="11" font-weight="400" fill="#B4B2A9">大降，多候选收益骤减</text>
+<text x="360" y="662" font-size="11" font-weight="400" fill="#B4B2A9"><tspan fill="#97C459">修正：</tspan>grammar 后 n=1 起步；候选裁决</text>
+<text x="360" y="678" font-size="11" font-weight="400" fill="#B4B2A9">保留为校验而非采样策略</text>
+<rect x="40" y="698" width="600" height="80" rx="8" fill="#27500A" stroke="#97C459" stroke-width="0.5"/>
+<text x="52" y="720" font-size="12" font-weight="500" fill="#C0DD97">原设计正确、应保留的部分</text>
+<text x="52" y="740" font-size="11" font-weight="400" fill="#C0DD97">stream:false + bounded buffer + 不发布部分语义 · 全候选严格门（grammar 后转为形式校验）</text>
+<text x="52" y="756" font-size="11" font-weight="400" fill="#C0DD97">codec / factory 显式枚举（Rule of Three + 车规审计轨迹）· offline / online 复用同一 JSON</text>
+<text x="52" y="772" font-size="11" font-weight="400" fill="#C0DD97">NluConfig → Model → Profile 配置分层方向正确（本方案在其上细化字段归属）</text>
+</svg>
+<div class="cap">图 1 · V3 配置方案问题地图（P0/P1/P2 分级 + 保留项）</div></div>
+
+<h3><span class="badge b-p0">P0-1</span>生成侧约束缺失 —— 最重要的一个问题</h3>
+<p><b>你的现状：</b>BuildRequest 的固定 JSON 只含 <code>model / messages / temperature / top_p / top_k / max_tokens / stream:false</code>，没有 <code>response_format</code>。全部格式鲁棒性由 ParseResponse 承担：精确 descriptor marker 匹配 + 全候选通过才发布。</p>
+<p><b>为什么这不合适：</b>LLM 的输出本质是从分布里采样，prompt 对输出格式只是<b>软约束</b>；0.6B 级模型再经 Q4/Q6 量化，指令跟随能力进一步下降——marker 漂移是统计必然，不是偶发事故。事后严格解析只能“拒绝坏输出”，永远不能“阻止坏输出”。这与 llama.cpp autoparser 的教训一致：连 llama.cpp 自己都要靠十几个家族的白名单 workaround 兜底，事后解析永远在和模型漂移博弈。而 llama.cpp 恰好是做<b>事前约束</b>最方便的引擎：请求加 <code>response_format: {"type":"json_schema","json_schema":{...}}</code>，llama-server 内部把 schema 编译为 GBNF grammar，<b>每一步 token 采样都被限制在合法语法内</b>，语法失败概率趋近于 0。</p>
+<p><b>不改会发生什么：</b>间歇性 marker miss → 候选全灭 → unknown 兜底率随模型版本 / 量化版本漂移上升；且你无法区分“模型能力不足”与“协议设计缺陷”，排障只能人肉翻 bad case，每次换 GGUF 都要重新回归。</p>
+<p><b>修正方案：</b>HTTP 路径请求体加 <code>response_format</code>；offline 路径在 <code>common_chat_templates_apply</code> 的 inputs 里传 <code>json_schema</code>，返回的 <code>common_chat_params.grammar</code> 注入采样器。建议 grammar 直接覆盖「marker 行 + JSON 体」——<b>nlu_10 协议本身完全不用改</b>，marker 也纳入语法约束。将来若想切纯 JSON 协议，走你们 TODO 里预留的 codec + factory 显式新增（nlu_11），别悄悄改。</p>
+<p><b>边界认识（重要）：</b>grammar 只保<b>语法</b>不保<b>语义</b>——<code>{"intent":"weather","slots":{"city":""}}</code> 是 schema 合法的，但仍可能过不了你们的槽位校验。语法失败被消灭后，语义级失败仍在，这正是 P1-1 失败出口的存在空间。</p>
+<p><b>如何验证：</b>上线前后对比 marker-miss 计数，预期下降 1–2 个数量级；ParseResponse 的严格门保留，但从“防线”降格为“形式校验”。</p>
+
+<h3><span class="badge b-p0">P0-2</span>thinking 行为未定义 —— 会直接打破 marker 匹配</h3>
+<p><b>你的现状：</b>BuildRequest 明确“无 thinking-control 字段”（你们的端点也禁止传入 thinking 字段——这个约束本身没问题）。</p>
+<p><b>为什么这不合适：</b>Qwen3-0.6B 是<b>混合思考模型</b>，GGUF 里的官方模板默认 <code>enable_thinking=true</code>：模型会先输出一段 <code>&lt;think&gt;…&lt;/think&gt;</code> 再进正文。后果有三层：① descriptor marker 前面垫着几百 token 的思考文本，marker 匹配偏移甚至匹配不到；② 思考段先消耗 <code>max_tokens</code> 预算，正文可能被截断在半截 JSON 上；③ 车机 1.5–2s 延迟预算被思考段吃掉一大块。</p>
+<p><b>修正方案（按你们的端点约束适配，不加请求字段）：</b>分阶段三层——</p>
+<ul>
+  <li><b>L2（立即可用）</b>：在 system / user 消息末尾追加 <code>/no_think</code>。这是 Qwen3 家族的软开关，走 <code>--jinja</code> + GGUF 原生模板即可生效，不需要任何 API 字段；</li>
+  <li><b>L4（训练季，终态）</b>：nlu_10 LoRA SFT 数据不含 think 段、用与线上同一模板渲染——模型母语就是非思考输出，运行时零依赖；</li>
+  <li><b>S0（常驻兜底）</b>：ParseResponse 前置剥离 <code>&lt;think&gt;…&lt;/think&gt;</code>，并入 V3 既有清洗步骤。注意要处理<b>未闭合</b>情形（生成流被 max_tokens 截断时只有开头 <code>&lt;think&gt;</code>）——此时剥到文本末尾并计入失败分类。</li>
+</ul>
+<p><b>如何验证：</b>S0 剥离命中率应随 L2 生效降至 ≈0；若居高不下，说明当前量化版本的模型没有遵循 <code>/no_think</code>，需检查模板是否走了 <code>--jinja</code> 路径。提醒：<code>/no_think</code> 是 Qwen3 家族特性，将来换 Qwen3.5+ 或其他家族需复核（届时以 L4 为准）。</p>
+
+<h3><span class="badge b-p0">P0-3</span>双路径渲染一致性未规定 —— “只在某平台复现”的排障地狱</h3>
+<p><b>你的现状：</b>Linux=HTTP（OpenAI endpoint）、Android=offline（inference hook）复用同一 JSON——这是对的；但方案没有规定两条路径<b>用哪个模板引擎渲染</b>。</p>
+<p><b>为什么这不合适：</b>llama.cpp 有两条模板路径：legacy（<code>llama-chat.cpp</code> 内置命名模板枚举 + 启发式指纹猜测）与 <code>--jinja</code>（执行 GGUF <code>tokenizer.chat_template</code> 里模型作者写的 Jinja）。不开 <code>--jinja</code>（或 API 侧 <code>use_jinja=true</code>）时启发式可能误选；两个平台若一个走 legacy、一个走 jinja，渲染结果<b>字节级不同</b>（空白、消息头格式差异），模型看到的分布不同，marker 就会在一个平台稳定、另一个平台偶发 miss——这种跨平台不对称故障在现场几乎无法定位。</p>
+<p><b>修正方案：</b>两侧统一 <code>use_jinja=true</code>；模板唯一事实源 = GGUF 元数据（与权重同文件、同版本、一起 OTA）；<b>NluConfig 里不要放模板字符串的第二份拷贝</b>——第二份必然漂移。这条还直接影响 P0-2：legacy 路径不支持模板变量，<code>/no_think</code> 的可靠性依赖 jinja 路径。</p>
+<p><b>如何验证：</b>用同一组 messages 在 Linux / Android 两路径分别渲染，diff 结果应字节级一致（可做成一条 CI 用例）。</p>
+
+<h3><span class="badge b-p1">P1-1</span>失败出口未定义 —— “全候选不通过”之后系统去哪</h3>
+<p><b>你的现状：</b>“全部候选通过后才发布”定义了成功路径，但它的反路径——全都不通过时系统去向——是未定义状态（隐含直接 unknown 兜底）。</p>
+<p><b>为什么不合适：</b>grammar 落地后语法失败≈0，但<b>语义级失败</b>（槽位为空、值不合法、候选风格不匹配）仍会发生。失败有两种成因：采样噪声（带反馈重采样即可修复）与系统性问题（prompt 歧义、schema 缺陷、模型能力不足）。直接兜底无法区分两者，等于把一次免费的成功机会和一条健康告警一起扔掉。</p>
+<p><b>修正方案：</b>有界重试阶梯（详见第 3 节与图 3）：失败分类先行（只有格式/校验失败可重试，超时/取消/5xx 直接兜底）→ 预算守卫（elapsed &lt; T_total/2）→ retry ×1（原 messages + 失败原因反馈 + temperature ↓）→ 仍败 → unknown → DM。两次尝试封闭在 NluLlmManager 内部，对外仍是 1 个逻辑请求——这是与你们 NLU 网关幂等/并发主线的直接对接点：失败尝试若泄漏到历史层，重试成功后历史里就有脏记录。</p>
+
+<h3><span class="badge b-p1">P1-2</span>采样参数耦合进共享协议 —— 换模型 = 改代码发版</h3>
+<p><b>你的现状：</b><code>temperature / top_p / top_k / max_tokens</code> 写死在共享的 BuildRequest 固定 JSON 里。</p>
+<p><b>为什么不合适：</b>这四个值是<b>模型相关参数</b>，不是协议：Qwen3-0.6B 的 Q4 与 Q6 需要的温度不同，换云端模型更是完全不同。写死在共享代码里，每次换模型/量化版本都要改代码发版。另外两点常被忽视：① NLU 是<b>决策型输出</b>（intent+slots），不是闲聊——聊天取向的默认温度（0.7 一类）在这里不合适，建议 temperature ≤ 0.2；② <code>max_tokens</code> 是预算杠杆（think 关闭后可以收紧，直接省延迟），与采样质量杠杆应分开管理。</p>
+<p><b>修正方案：</b>四个参数全部移入 Profile 下发（你们 NluConfig→Model→Profile 分层已预留位置）；BuildRequest 的 JSON schema 保持冻结——<b>稳定的进协议，易变的进配置</b>。配套：grammar 落地后 n=1 起步（见 P2-2）。</p>
+
+<h3><span class="badge b-p1">P1-3</span>墙钟预算与 barge-in 取消未定义</h3>
+<p><b>你的现状：</b><code>stream:false</code> 意味着只有 <code>max_tokens</code> 这个 token 数上界，没有墙钟时间上界；用户抢话打断（barge-in）时请求的取消行为也未定义。</p>
+<p><b>为什么不合适：</b>车机语音交互的延迟预算是硬约束（用户在等）。超时说明预算已耗尽，此时重试只会更糟；取消说明用户已放弃，继续生成浪费电量和算力（端侧 0.6B 跑在 SoC 上尤其敏感）。</p>
+<p><b>修正方案：</b>定义 T_total 墙钟预算（Runtime 层配置）；超时/取消 propagates 到引擎侧停止采样；<b>取消与超时一律不进 retry</b>，直接收口。这与 P1-1 的失败分类是同一条规则的三个分支。</p>
+
+<h3><span class="badge b-p2">P2-1</span>可观测性缺口</h3>
+<p>方案没有任何运行指标。建议最小集：四类失败分类计数（marker_miss / schema_fail / semantic_fail / timeout）、S0 剥离命中率（= /no_think 是否仍然生效的探针）、retry-rate（grammar 生效后应≈0，爬升说明该修 prompt/schema 而不是 parser）。车规 OTA 场景下，这些计数是配置和代码之外唯一的问题定位线索——没有它们，现场问题只能靠复现。</p>
+
+<h3><span class="badge b-p2">P2-2</span>多候选成本未评估</h3>
+<p>“全候选通过才发布”逻辑正确，但注意成本：n 个候选 = n 次完整生成，延迟线性放大。grammar 落地前多候选是对漂移的补偿；落地后语义分歧概率大降，n=1 大概率足够。建议：grammar 上线前保留小 n，上线后切 n=1 并观察 semantic_fail 计数，把候选裁决保留为<b>校验手段</b>而非<b>采样策略</b>。</p>
+
+<h2 id="s2"><span class="no">2</span>重构后的整体设计</h2>
+<div class="fig"><svg viewBox="0 0 680 610" width="100%" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" role="img">
+<title>重构后的 NLU-LLM 请求处理管线</title>
+<desc>五阶段纵向流水线：BuildRequest、Dispatch 双路径分发与受限生成、ParseResponse 五段解析、Publish、FailureExit，外圈幂等边界，retry 回环指回 Dispatch</desc>
+<defs>
+<marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+<path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+</marker>
+</defs>
+<text x="40" y="44" font-size="15" font-weight="500" fill="#D3D1C7">重构后的 NLU-LLM 请求处理管线</text>
+<text x="40" y="64" font-size="11" font-weight="400" fill="#B4B2A9">约束前置 · 失败有出口 · 双路径渲染一致 · 幂等边界：内部重试对外仍是 1 个逻辑请求，失败尝试不入历史</text>
+<rect x="32" y="76" width="596" height="512" rx="12" fill="none" stroke="#85B7EB" stroke-width="0.5" stroke-dasharray="6 4" opacity="0.55"/>
+<rect x="40" y="88" width="520" height="82" rx="8" fill="#2C2C2A" stroke="#5F5E5A" stroke-width="0.5"/>
+<rect x="46" y="94" width="3" height="70" fill="#85B7EB"/>
+<text x="58" y="110" font-size="13" font-weight="500" fill="#D3D1C7">① BuildRequest · 构建请求</text>
+<text x="58" y="128" font-size="11" font-weight="400" fill="#B4B2A9">冻结协议：nlu_10 · messages schema · descriptor markers（跨模型不变）</text>
+<text x="58" y="144" font-size="11" font-weight="400" fill="#B4B2A9">Profile 注入：temp / top_p / top_k / max_tokens · json_schema 约束 · 末尾 /no_think</text>
+<text x="58" y="160" font-size="11" font-weight="400" fill="#B4B2A9">字段归属三层：协议冻结 / Profile 可变 / Runtime 环境（详见文档第 4 节）</text>
+<rect x="40" y="190" width="520" height="82" rx="8" fill="#2C2C2A" stroke="#5F5E5A" stroke-width="0.5"/>
+<rect x="46" y="196" width="3" height="70" fill="#85B7EB"/>
+<text x="58" y="212" font-size="13" font-weight="500" fill="#D3D1C7">② Dispatch · 双路径分发 + 受限生成</text>
+<text x="58" y="230" font-size="11" font-weight="400" fill="#B4B2A9">Linux：llama-server /v1/chat/completions（--jinja · response_format → GBNF）</text>
+<text x="58" y="246" font-size="11" font-weight="400" fill="#B4B2A9">Android：offline hook → common_chat_templates_apply(use_jinja=true) + grammar</text>
+<text x="58" y="262" font-size="11" font-weight="400" fill="#B4B2A9">受限生成：语法失败 ≈ 0 · 语法完成即停 · T_total 墙钟 · barge-in 取消不重试</text>
+<rect x="40" y="292" width="520" height="82" rx="8" fill="#2C2C2A" stroke="#5F5E5A" stroke-width="0.5"/>
+<rect x="46" y="298" width="3" height="70" fill="#85B7EB"/>
+<text x="58" y="314" font-size="13" font-weight="500" fill="#D3D1C7">③ ParseResponse · 五段解析</text>
+<text x="58" y="332" font-size="11" font-weight="400" fill="#B4B2A9">S0 剥 think 段（含未闭合兜底）→ S1 marker → S2 JSON+schema → S3 语义/槽位 → S4 候选裁决</text>
+<text x="58" y="348" font-size="11" font-weight="400" fill="#B4B2A9">失败分类计数上报：marker / schema / 语义 / 超时（P2 可观测性）</text>
+<text x="58" y="364" font-size="11" font-weight="400" fill="#B4B2A9">grammar 落地后，全候选门从「防线」转为「形式校验」</text>
+<rect x="40" y="394" width="520" height="82" rx="8" fill="#2C2C2A" stroke="#5F5E5A" stroke-width="0.5"/>
+<rect x="46" y="400" width="3" height="70" fill="#97C459"/>
+<text x="58" y="416" font-size="13" font-weight="500" fill="#D3D1C7">④ Publish · 发布</text>
+<text x="58" y="434" font-size="11" font-weight="400" fill="#B4B2A9">全候选通过 → 发布结果 + 写会话历史（仅成功一次，失败尝试不入历史）</text>
+<text x="58" y="450" font-size="11" font-weight="400" fill="#B4B2A9">S0 命中率 · retry-rate 随响应上报，作为 prompt / schema 健康探针</text>
+<text x="58" y="466" font-size="11" font-weight="400" fill="#B4B2A9">与网关会话幂等控制对齐：一次逻辑请求只产生一条历史</text>
+<rect x="40" y="496" width="520" height="82" rx="8" fill="#2C2C2A" stroke="#5F5E5A" stroke-width="0.5"/>
+<rect x="46" y="502" width="3" height="70" fill="#EF9F27"/>
+<text x="58" y="518" font-size="13" font-weight="500" fill="#D3D1C7">⑤ FailureExit · 失败出口（有界重试）</text>
+<text x="58" y="536" font-size="11" font-weight="400" fill="#B4B2A9">格式/校验失败 → 预算守卫（elapsed &lt; T/2）→ retry ×1：失败原因反馈 + temperature ↓</text>
+<text x="58" y="552" font-size="11" font-weight="400" fill="#B4B2A9">超时 / 取消 / 5xx 一律不重试 → 兜底 unknown → DM</text>
+<text x="58" y="568" font-size="11" font-weight="400" fill="#B4B2A9">两次尝试封闭在 Manager 内部，对外仍是 1 个逻辑请求</text>
+<line x1="300" y1="170" x2="300" y2="188" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#arrow)"/>
+<line x1="300" y1="272" x2="300" y2="290" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#arrow)"/>
+<line x1="300" y1="374" x2="300" y2="392" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#arrow)"/>
+<line x1="300" y1="476" x2="300" y2="494" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#arrow)"/>
+<path d="M 560 537 H 620 V 231 H 566" fill="none" stroke="#EF9F27" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#arrow)"/>
+<text x="566" y="528" font-size="11" font-weight="400" fill="#EF9F27">retry ×1</text>
+</svg>
+<div class="cap">图 2 · 重构后的 NLU-LLM 请求处理管线（目标态，含幂等边界与 retry 回环）</div></div>
+<table>
+  <tr><th>阶段</th><th>职责</th><th>关键规则</th></tr>
+  <tr><td>① BuildRequest</td><td>组装请求</td><td>协议冻结（nlu_10 schema/markers）；Profile 注入采样参数与预算；json_schema 约束；<code>/no_think</code> 后缀</td></tr>
+  <tr><td>② Dispatch + 受限生成</td><td>双路径分发</td><td>Linux llama-server（<code>--jinja</code> + response_format→GBNF）；Android offline（<code>use_jinja=true</code> + grammar 注入）；两路径渲染字节级一致；T_total 墙钟 + 取消传播</td></tr>
+  <tr><td>③ ParseResponse</td><td>五段解析</td><td>S0 剥 think → S1 marker → S2 JSON+schema → S3 语义/槽位 → S4 候选裁决；每段失败分类计数</td></tr>
+  <tr><td>④ Publish</td><td>发布</td><td>全候选通过 → 发布 + 写会话历史（仅成功一次）；S0 命中率 / retry-rate 上报</td></tr>
+  <tr><td>⑤ FailureExit</td><td>失败出口</td><td>分类 → 预算守卫 → retry ×1（失败反馈 + 降温）→ 兜底 unknown→DM；两次尝试对外 = 1 个逻辑请求</td></tr>
+</table>
+
+<h2 id="s3"><span class="no">3</span>失败出口与有界重试</h2>
+<div class="fig"><svg viewBox="0 0 680 500" width="100%" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" role="img">
+<title>失败出口状态机 · 有界重试阶梯</title>
+<desc>尝试一次后按结果分类：成功则发布写历史；格式或校验失败先过预算守卫再重试一次；超时取消或 5xx 直接兜底</desc>
+<defs>
+<marker id="arrow2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+<path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+</marker>
+</defs>
+<text x="40" y="44" font-size="15" font-weight="500" fill="#D3D1C7">失败出口状态机 · 有界重试阶梯</text>
+<text x="40" y="64" font-size="11" font-weight="400" fill="#B4B2A9">每个失败都有定义好的出口 · 延迟上界 = 2× 单次 · 区分采样噪声与系统性失败</text>
+<rect x="40" y="110" width="120" height="56" rx="8" fill="#2C2C2A" stroke="#5F5E5A" stroke-width="0.5"/>
+<text x="100" y="131" font-size="13" font-weight="500" fill="#D3D1C7" text-anchor="middle" dominant-baseline="central">尝试 #1</text>
+<text x="100" y="149" font-size="11" font-weight="400" fill="#B4B2A9" text-anchor="middle" dominant-baseline="central">首次生成</text>
+<rect x="40" y="210" width="120" height="56" rx="8" fill="#2C2C2A" stroke="#5F5E5A" stroke-width="0.5"/>
+<text x="100" y="231" font-size="13" font-weight="500" fill="#D3D1C7" text-anchor="middle" dominant-baseline="central">结果分类</text>
+<text x="100" y="249" font-size="11" font-weight="400" fill="#B4B2A9" text-anchor="middle" dominant-baseline="central">格式 / 环境 / 成功</text>
+<rect x="250" y="60" width="190" height="56" rx="8" fill="#27500A" stroke="#97C459" stroke-width="0.5"/>
+<text x="345" y="81" font-size="13" font-weight="500" fill="#C0DD97" text-anchor="middle" dominant-baseline="central">发布 + 写会话历史</text>
+<text x="345" y="99" font-size="11" font-weight="400" fill="#C0DD97" text-anchor="middle" dominant-baseline="central">仅成功一次 · 无脏记录</text>
+<rect x="250" y="190" width="190" height="56" rx="8" fill="#633806" stroke="#EF9F27" stroke-width="0.5"/>
+<text x="345" y="211" font-size="13" font-weight="500" fill="#FAC775" text-anchor="middle" dominant-baseline="central">预算守卫 elapsed &lt; T/2</text>
+<text x="345" y="229" font-size="11" font-weight="400" fill="#FAC775" text-anchor="middle" dominant-baseline="central">防双重惩罚</text>
+<rect x="470" y="190" width="170" height="72" rx="8" fill="#633806" stroke="#EF9F27" stroke-width="0.5"/>
+<text x="555" y="212" font-size="13" font-weight="500" fill="#FAC775" text-anchor="middle" dominant-baseline="central">尝试 #2（仅一次）</text>
+<text x="555" y="230" font-size="11" font-weight="400" fill="#FAC775" text-anchor="middle" dominant-baseline="central">原 messages + 失败反馈</text>
+<text x="555" y="248" font-size="11" font-weight="400" fill="#FAC775" text-anchor="middle" dominant-baseline="central">temperature ↓ · 同一请求</text>
+<rect x="250" y="330" width="190" height="72" rx="8" fill="#791F1F" stroke="#F09595" stroke-width="0.5"/>
+<text x="345" y="352" font-size="13" font-weight="500" fill="#F7C1C1" text-anchor="middle" dominant-baseline="central">兜底：unknown → DM</text>
+<text x="345" y="370" font-size="11" font-weight="400" fill="#F7C1C1" text-anchor="middle" dominant-baseline="central">超时 / 取消 / 5xx 不重试</text>
+<text x="345" y="388" font-size="11" font-weight="400" fill="#F7C1C1" text-anchor="middle" dominant-baseline="central">失败分类 + retry-rate 计数</text>
+<line x1="100" y1="166" x2="100" y2="206" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#arrow2)"/>
+<line x1="160" y1="224" x2="246" y2="94" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#arrow2)"/>
+<text x="178" y="152" font-size="11" font-weight="400" fill="#97C459">成功</text>
+<line x1="160" y1="238" x2="246" y2="216" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#arrow2)"/>
+<text x="164" y="182" font-size="11" font-weight="400" fill="#EF9F27">格式 / 校验失败</text>
+<line x1="160" y1="252" x2="246" y2="360" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#arrow2)"/>
+<text x="164" y="312" font-size="11" font-weight="400" fill="#F09595">超时 / 取消 / 5xx</text>
+<line x1="440" y1="218" x2="466" y2="218" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#arrow2)"/>
+<text x="446" y="206" font-size="11" font-weight="400" fill="#EF9F27">通过</text>
+<line x1="345" y1="246" x2="345" y2="326" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#arrow2)"/>
+<text x="352" y="290" font-size="11" font-weight="400" fill="#EF9F27">否 · 预算不足</text>
+<path d="M 555 190 V 88 H 444" fill="none" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#arrow2)"/>
+<text x="563" y="140" font-size="11" font-weight="400" fill="#97C459">成功</text>
+<path d="M 555 262 V 358 H 444" fill="none" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#arrow2)"/>
+<text x="563" y="322" font-size="11" font-weight="400" fill="#F09595">仍失败</text>
+<rect x="40" y="414" width="600" height="64" rx="8" fill="none" stroke="#5F5E5A" stroke-width="0.5" stroke-dasharray="5 4"/>
+<text x="52" y="438" font-size="11" font-weight="400" fill="#B4B2A9">封闭边界：两次尝试全部封闭在 NluLlmManager 内部 · 对外 1 个逻辑请求 · 失败尝试不写会话历史</text>
+<text x="52" y="460" font-size="11" font-weight="400" fill="#B4B2A9">retry-rate 是健康探针：grammar 生效后应 ≈ 0；爬升说明该修 prompt / schema，而非加重试</text>
+</svg>
+<div class="cap">图 3 · 失败出口状态机（分类 → 守卫 → 单次反馈重试 → 兜底）</div></div>
+<table>
+  <tr><th>规则</th><th>内容</th><th>理由</th></tr>
+  <tr><td>1 · 失败分类先行</td><td>只有「格式/校验失败」可重试；超时/取消/5xx 直接兜底</td><td>超时 = 预算已尽，重试更糟；取消 = 用户已放弃</td></tr>
+  <tr><td>2 · 预算守卫</td><td><code>elapsed &lt; T_total / 2</code> 才允许 retry</td><td>防「首次耗尽预算 + 重试再超时」双重惩罚，延迟上界恒为 2× 单次</td></tr>
+  <tr><td>3 · 反馈式重试</td><td>原 messages 原样保留 + 追加失败原因 + temperature ↓</td><td>LLM 自我修正依赖错误信息，盲重采样成功率远低于带反馈重试</td></tr>
+  <tr><td>4 · 幂等边界</td><td>两次尝试封闭在 Manager 内，对外 1 个逻辑请求；失败尝试不写历史</td><td>与网关 QueryGuard / 会话幂等控制对齐，防止历史层脏记录</td></tr>
+  <tr><td>5 · 健康探针</td><td>retry-rate 上报，grammar 生效后应 ≈ 0</td><td>带反馈仍失败 = 系统性信号（修 prompt/schema，而非加重试）</td></tr>
+</table>
+<p>为什么是 <b>×1</b> 而不是 ×N：带反馈仍失败意味着第三次成功率趋近零——×1 是区分「采样噪声」与「系统性失败」的最小实验；延迟上界 2× 可预算；端侧每次 retry 是完整重生成（反馈消息改变了后缀，前缀 KV 复用省不了多少）。</p>
+
+<h2 id="s4"><span class="no">4</span>配置模型（目标态）</h2>
+<h3>4.1 字段归属三层</h3>
+<table>
+  <tr><th>层</th><th>内容</th><th>变更触发</th></tr>
+  <tr><td><b>协议（冻结）</b></td><td>nlu_10：messages schema、descriptor markers、输出 schema（grammar 与解析校验同源）</td><td>codec + factory 显式新增（代码评审 + 单测轨迹）</td></tr>
+  <tr><td><b>Profile（可变）</b></td><td>temperature / top_p / top_k、max_tokens（预算杠杆）、thinking 模式、response_schema 引用、候选数 n</td><td>换模型 / 换量化 / 调优（纯配置变更）</td></tr>
+  <tr><td><b>Runtime（环境）</b></td><td>endpoint / offline lib、use_jinja、T_total 墙钟、retry 策略</td><td>平台部署参数</td></tr>
+</table>
+<h3>4.2 NluConfig 目标形态</h3>
+<pre><code>nlu_llm:
+  protocol: nlu_10                # 冻结：messages schema + markers + 输出 schema
+  model:
+    id: qwen3-0.6b
+    quant: Q6_K                   # 结构化输出对量化敏感：建议 Q6/Q8 起步
+    gguf: models/qwen3-0.6b-q6_k.gguf
+    sha256: 7f3a...               # 权重+模板同版本锁定（模板内嵌 GGUF，无第二份）
+  profiles:
+    default:
+      temperature: 0.1            # 决策型输出：低温
+      top_p: 0.8
+      top_k: 20
+      max_tokens: 256             # think 关闭后可收紧（预算杠杆）
+      response_schema: nlu_10     # 生成侧约束（HTTP 与 offline 均生效）
+      thinking: no_think_suffix   # L2；SFT 后切换为 baked
+      candidates: 1               # grammar 落地后 n=1 起步
+  runtime:
+    linux:
+      endpoint: http://127.0.0.1:8080/v1/chat/completions
+      use_jinja: true             # 与 Android 保持同一渲染
+    android:
+      lib: libnlu_offline.so
+      use_jinja: true
+    budget_ms: 2000               # T_total 墙钟
+    retry:
+      max: 1
+      guard: half_budget
+      feedback: true</code></pre>
+<h3>4.3 请求示例（BuildRequest 产物）</h3>
+<pre><code>{
+  "model": "qwen3-0.6b",
+  "messages": [
+    {"role": "system", "content": "你是车机 NLU 引擎……严格按 nlu_10 协议输出。/no_think"},
+    {"role": "user",   "content": "把空调调到二十四度 /no_think"}
+  ],
+  "temperature": 0.1, "top_p": 0.8, "top_k": 20,
+  "max_tokens": 256, "stream": false,
+  "response_format": {
+    "type": "json_schema",
+    "json_schema": {
+      "name": "nlu_10",
+      "strict": true,
+      "schema": { "marker 行 + intent/slots 结构，与 ParseResponse 校验同源" : true }
+    }
+  }
+}</code></pre>
+<h3>4.4 retry 反馈消息示例（P1-1 规则 3）</h3>
+<pre><code>[... 原 messages 原样 ...,
+ {"role": "assistant", "content": "&lt;上一次的原始输出&gt;"},
+ {"role": "user", "content": "上一次输出未通过解析：marker 'nlu_10' 未命中。
+  请严格按协议重新输出，不要包含思考过程。/no_think"}]</code></pre>
+
+<h2 id="s5"><span class="no">5</span>解析流水线细则（S0–S4）</h2>
+<table>
+  <tr><th>段</th><th>输入</th><th>处理</th><th>失败归类 / 指标</th></tr>
+  <tr><td>S0</td><td>原始生成文本</td><td>剥 <code>&lt;think&gt;…&lt;/think&gt;</code>；未闭合（截断）→ 剥到末尾</td><td>S0 命中率（/no_think 生效性探针）</td></tr>
+  <tr><td>S1</td><td>S0 输出</td><td>descriptor marker begin/end 提取</td><td>marker_miss（grammar 后应 ≈0）</td></tr>
+  <tr><td>S2</td><td>marker 间正文</td><td>JSON parse + schema 校验（与 grammar 同源的 schema）</td><td>schema_fail</td></tr>
+  <tr><td>S3</td><td>结构化候选</td><td>槽位语义校验、候选风格匹配（既有 SemanticFrame / SlotNormalizer）</td><td>semantic_fail（retry 的触发源）</td></tr>
+  <tr><td>S4</td><td>全部合法候选</td><td>候选裁决（n=1 时退化为直通）；全败 → FailureExit</td><td>publish / fallback</td></tr>
+</table>
+
+<h2 id="s6"><span class="no">6</span>落地顺序（五阶段，每步独立可回滚）</h2>
+<table>
+  <tr><th>阶段</th><th>改动</th><th>依赖</th><th>验证</th><th>回滚</th></tr>
+  <tr><td>0 · 本周</td><td>S0 剥 think + <code>/no_think</code> 后缀</td><td>无（纯代码）</td><td>S0 命中率、marker miss 下降</td><td>移除后缀</td></tr>
+  <tr><td>1</td><td>llama-server <code>--jinja</code>；双路径渲染 diff 用例</td><td>server 启动参数</td><td>两路径渲染字节级一致</td><td>去 <code>--jinja</code></td></tr>
+  <tr><td>2</td><td><code>response_format</code> json_schema 上线</td><td>确认 llama-server 版本支持</td><td>marker-miss 降 1–2 个数量级</td><td>删请求字段</td></tr>
+  <tr><td>3</td><td>失败出口 + retry×1 + 四类指标</td><td>阶段 2</td><td>retry-rate ≈ 0；延迟上界 2× 单次</td><td>retry.max=0</td></tr>
+  <tr><td>4 · 训练季</td><td>nlu_10 LoRA SFT（无 think 数据、同模板、LLaMA-Factory）</td><td>数据准备</td><td>评测通过后移除 /no_think 依赖</td><td>切回原生 GGUF</td></tr>
+</table>
+<p>阶段 4 之后，thinking 控制从 L2 升级到 L4（训练烧死），运行时零依赖——届时端点禁不禁 thinking 字段已无关紧要。</p>
+
+<h2 id="s7"><span class="no">7</span>原设计中应保留的部分（明确肯定）</h2>
+<div class="card good">
+<ul>
+  <li><b>stream:false + bounded buffer + 不发布部分语义</b> —— NLU 输出是决策不是展示，半截槽位发布是事故（<code>"city":"北"</code> 就去查天气）。流式机制 llama.cpp 现成（is_partial + compute_diffs），延后成本低，是期权不是欠债；</li>
+  <li><b>全候选严格门</b> —— 逻辑正确；grammar 落地后自动降格为形式校验，无需删除；</li>
+  <li><b>codec + 显式 factory case 的 TODO 边界</b> —— Rule of Three：样本量为 1 时不做抽象；显式枚举让协议变更有代码轨迹，车规审计需要；运行时可插拔协议框架 = 重造 autoparser，明确不做；</li>
+  <li><b>offline / online 复用同一 JSON</b> —— 双路径一致性的基础，只需再补「同一模板引擎」这一条；</li>
+  <li><b>NluConfig → Model → Profile 分层</b> —— 方向正确，本方案只是把字段归属进一步明确（第 4.1 节）。</li>
+</ul>
+</div>
+
+<footer>
+  本文档与三张独立 SVG（pipeline / retry-ladder / issue-map）同目录分发 · 生成于 2026-10-26 · 基于 llama.cpp master 与 TensorRT-LLM 1.4.0rc2 源码核对
+</footer>
+
+</div>
+</body>
+</html>

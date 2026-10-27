@@ -1,0 +1,48 @@
+<svg viewBox="0 0 680 610" width="100%" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" role="img">
+<title>重构后的 NLU-LLM 请求处理管线</title>
+<desc>五阶段纵向流水线：BuildRequest、Dispatch 双路径分发与受限生成、ParseResponse 五段解析、Publish、FailureExit，外圈幂等边界，retry 回环指回 Dispatch</desc>
+<defs>
+<marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+<path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+</marker>
+</defs>
+<text x="40" y="44" font-size="15" font-weight="500" fill="#D3D1C7">重构后的 NLU-LLM 请求处理管线</text>
+<text x="40" y="64" font-size="11" font-weight="400" fill="#B4B2A9">约束前置 · 失败有出口 · 双路径渲染一致 · 幂等边界：内部重试对外仍是 1 个逻辑请求，失败尝试不入历史</text>
+<rect x="32" y="76" width="596" height="512" rx="12" fill="none" stroke="#85B7EB" stroke-width="0.5" stroke-dasharray="6 4" opacity="0.55"/>
+<rect x="40" y="88" width="520" height="82" rx="8" fill="#2C2C2A" stroke="#5F5E5A" stroke-width="0.5"/>
+<rect x="46" y="94" width="3" height="70" fill="#85B7EB"/>
+<text x="58" y="110" font-size="13" font-weight="500" fill="#D3D1C7">① BuildRequest · 构建请求</text>
+<text x="58" y="128" font-size="11" font-weight="400" fill="#B4B2A9">冻结协议：nlu_10 · messages schema · descriptor markers（跨模型不变）</text>
+<text x="58" y="144" font-size="11" font-weight="400" fill="#B4B2A9">Profile 注入：temp / top_p / top_k / max_tokens · json_schema 约束 · 末尾 /no_think</text>
+<text x="58" y="160" font-size="11" font-weight="400" fill="#B4B2A9">字段归属三层：协议冻结 / Profile 可变 / Runtime 环境（详见文档第 4 节）</text>
+<rect x="40" y="190" width="520" height="82" rx="8" fill="#2C2C2A" stroke="#5F5E5A" stroke-width="0.5"/>
+<rect x="46" y="196" width="3" height="70" fill="#85B7EB"/>
+<text x="58" y="212" font-size="13" font-weight="500" fill="#D3D1C7">② Dispatch · 双路径分发 + 受限生成</text>
+<text x="58" y="230" font-size="11" font-weight="400" fill="#B4B2A9">Linux：llama-server /v1/chat/completions（--jinja · response_format → GBNF）</text>
+<text x="58" y="246" font-size="11" font-weight="400" fill="#B4B2A9">Android：offline hook → common_chat_templates_apply(use_jinja=true) + grammar</text>
+<text x="58" y="262" font-size="11" font-weight="400" fill="#B4B2A9">受限生成：语法失败 ≈ 0 · 语法完成即停 · T_total 墙钟 · barge-in 取消不重试</text>
+<rect x="40" y="292" width="520" height="82" rx="8" fill="#2C2C2A" stroke="#5F5E5A" stroke-width="0.5"/>
+<rect x="46" y="298" width="3" height="70" fill="#85B7EB"/>
+<text x="58" y="314" font-size="13" font-weight="500" fill="#D3D1C7">③ ParseResponse · 五段解析</text>
+<text x="58" y="332" font-size="11" font-weight="400" fill="#B4B2A9">S0 剥 think 段（含未闭合兜底）→ S1 marker → S2 JSON+schema → S3 语义/槽位 → S4 候选裁决</text>
+<text x="58" y="348" font-size="11" font-weight="400" fill="#B4B2A9">失败分类计数上报：marker / schema / 语义 / 超时（P2 可观测性）</text>
+<text x="58" y="364" font-size="11" font-weight="400" fill="#B4B2A9">grammar 落地后，全候选门从「防线」转为「形式校验」</text>
+<rect x="40" y="394" width="520" height="82" rx="8" fill="#2C2C2A" stroke="#5F5E5A" stroke-width="0.5"/>
+<rect x="46" y="400" width="3" height="70" fill="#97C459"/>
+<text x="58" y="416" font-size="13" font-weight="500" fill="#D3D1C7">④ Publish · 发布</text>
+<text x="58" y="434" font-size="11" font-weight="400" fill="#B4B2A9">全候选通过 → 发布结果 + 写会话历史（仅成功一次，失败尝试不入历史）</text>
+<text x="58" y="450" font-size="11" font-weight="400" fill="#B4B2A9">S0 命中率 · retry-rate 随响应上报，作为 prompt / schema 健康探针</text>
+<text x="58" y="466" font-size="11" font-weight="400" fill="#B4B2A9">与网关会话幂等控制对齐：一次逻辑请求只产生一条历史</text>
+<rect x="40" y="496" width="520" height="82" rx="8" fill="#2C2C2A" stroke="#5F5E5A" stroke-width="0.5"/>
+<rect x="46" y="502" width="3" height="70" fill="#EF9F27"/>
+<text x="58" y="518" font-size="13" font-weight="500" fill="#D3D1C7">⑤ FailureExit · 失败出口（有界重试）</text>
+<text x="58" y="536" font-size="11" font-weight="400" fill="#B4B2A9">格式/校验失败 → 预算守卫（elapsed &lt; T/2）→ retry ×1：失败原因反馈 + temperature ↓</text>
+<text x="58" y="552" font-size="11" font-weight="400" fill="#B4B2A9">超时 / 取消 / 5xx 一律不重试 → 兜底 unknown → DM</text>
+<text x="58" y="568" font-size="11" font-weight="400" fill="#B4B2A9">两次尝试封闭在 Manager 内部，对外仍是 1 个逻辑请求</text>
+<line x1="300" y1="170" x2="300" y2="188" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#arrow)"/>
+<line x1="300" y1="272" x2="300" y2="290" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#arrow)"/>
+<line x1="300" y1="374" x2="300" y2="392" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#arrow)"/>
+<line x1="300" y1="476" x2="300" y2="494" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#arrow)"/>
+<path d="M 560 537 H 620 V 231 H 566" fill="none" stroke="#EF9F27" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#arrow)"/>
+<text x="566" y="528" font-size="11" font-weight="400" fill="#EF9F27">retry ×1</text>
+</svg>
